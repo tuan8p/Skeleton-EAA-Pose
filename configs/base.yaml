@@ -1,0 +1,78 @@
+﻿# =============================================================
+# base.yaml — shared defaults for all datasets
+# Per-dataset configs extend this file via the `extends` key.
+# =============================================================
+
+# ------------------------------------------------------------------
+# Person detector (RTMDet)
+# ------------------------------------------------------------------
+detector:
+  config: rtmdet_nano_320-8xb32_coco-person.py
+  checkpoint: rtmdet_nano_8xb32-100e_coco-obj365-person-05d8511e.pth
+  score_threshold: 0.3
+  nms_iou: 0.65
+  device: cuda
+
+# ------------------------------------------------------------------
+# Person tracker (ByteTrack via mmdet)
+# ------------------------------------------------------------------
+tracker:
+  # high_thresh: minimum detection score to seed a new track
+  high_thresh: 0.6
+  # low_thresh: minimum score for an existing track to absorb a det
+  low_thresh: 0.1
+  # max_lost: frames before a track is dropped
+  max_lost: 30
+  # min_hits: frames before a new track is confirmed
+  min_hits: 3
+
+# ------------------------------------------------------------------
+# Pose estimator (RTMW3D whole-body, 133 keypoints)
+# ------------------------------------------------------------------
+estimator:
+  config: rtmw3d-l_8xb64_cocktail14-384x288.py
+  checkpoint: rtmw3d-l_8xb64_cocktail14-384x288-794dbc78_20231122.pth
+  device: cuda
+  # Minimum confidence for a keypoint to be considered valid
+  keypoint_conf_threshold: 0.3
+
+# ------------------------------------------------------------------
+# 25-joint mapping & quality control
+# ------------------------------------------------------------------
+mapping:
+  # "midpoint" or "direct" — how computed joints (SpineBase etc.) are derived
+  spine_method: midpoint
+
+quality_control:
+  # Keypoints with confidence < min_conf are marked invalid (valid_mask=0)
+  min_conf: 0.3
+  # If a frame has > max_missing_ratio of joints invalid, the whole frame is flagged
+  max_missing_ratio: 0.4
+  # Maximum gap (frames) to interpolate over missing joints
+  max_interp_gap: 10
+  # Savitzky-Golay smoothing window (must be odd); 0 = disabled
+  smooth_window: 5
+  smooth_polyorder: 2
+  # Normalization: root-center (SpineBase) + scale by torso length
+  normalize: true
+
+metadata:
+  # One dataset-level JSON file for all generated samples.
+  filename: metadata.json
+
+qc_report:
+  # One QC JSON file per processed video. This is separate from training metadata.
+  enabled: true
+  filename_template: qc/{video_id}_qc.json
+  long_gap_threshold: 10
+  include_frame_statuses: false
+
+# ------------------------------------------------------------------
+# Output
+# ------------------------------------------------------------------
+output:
+  # Number of persons to keep per frame (select top-M by track score)
+  num_persons: 1
+  # Per-sample .npy array dtype
+  dtype: float32
+

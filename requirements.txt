@@ -1,0 +1,16 @@
+# Core dependencies (required for all modules)
+numpy>=1.24
+opencv-python>=4.8
+PyYAML>=6.0
+openpyxl>=3.1
+scipy>=1.11
+tqdm>=4.65
+
+# ---------------------------------------------------------------
+# GPU / MMPose stack — install separately on Colab (see README)
+# ---------------------------------------------------------------
+# torch>=2.1          (install matching CUDA version from pytorch.org)
+# mmcv>=2.1           pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html
+# mmdet>=3.2          pip install mmdet
+# mmpose>=1.3         pip install mmpose
+# lap>=0.4            pip install lap   (ByteTrack dependency)

@@ -1,0 +1,43 @@
+# =============================================================
+# pku_v1.yaml — PKU-MMD Version 1 dataset config
+# Extends base.yaml (all base values apply unless overridden).
+# =============================================================
+extends: base.yaml
+
+dataset: pku_v1
+video_ext: .avi
+annotation: pku_label   # format: label,start,end,confidence
+
+# ------------------------------------------------------------------
+# Module 1 — daily-action filter (PKU v1 only)
+# ------------------------------------------------------------------
+filter:
+  # Folder containing original PKU v1 skeleton .txt files
+  skeleton_dir: ./Skeleton_PKU
+  # Folder containing original PKU v1 label .txt files
+  label_dir: ./Label_PKUMMDv1
+  # Actions_v2.xlsx — highlighted rows = daily actions to keep
+  src_actions_xlsx: ./Actions_v2.xlsx
+
+  # Output folders (filtered label + skeleton copies)
+  out_label_dir: out/Label_PKUMMDv1_daily
+  out_skeleton_dir: out/Skeleton_PKU_daily
+  # Output action list (Label,Action CSV)
+  out_actions_csv: out/Actions_daily.csv
+
+# ------------------------------------------------------------------
+# Module 2 — pose pipeline paths
+# ------------------------------------------------------------------
+# Video directory (set to Drive path on Colab)
+video_dir: RGB_PKUMMDv1
+
+# Filtered label directory (output of Module 1)
+segments_dir: out/Label_PKUMMDv1_daily
+actions_xlsx: out/Actions_daily.csv
+
+# Output skeleton samples
+out_dir: out/skeletons_25_v1
+
+# PKU v1: usually 1 main person (daily actions)
+output:
+  num_persons: 1

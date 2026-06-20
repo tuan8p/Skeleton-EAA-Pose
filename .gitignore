@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project-specific
+checkpoints/
+data/
+out/
+*.npy
+.ipynb_checkpoints/
