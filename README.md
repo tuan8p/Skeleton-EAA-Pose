@@ -60,19 +60,29 @@ python -m eaa_pose.filter_pku_interactions --config configs/pku_v1.yaml \
 
 ```bash
 # PKU-MMD v1 (Colab, GPU)
-python -m eaa_pose.run_tracks --config configs/pku_v1.yaml --device cuda
+python -m eaa_pose.run_tracks --config configs/pku_v1.yaml --device cuda --all
 
 # PKU-MMD v2
-python -m eaa_pose.run_tracks --config configs/pku_v2.yaml --device cuda
+python -m eaa_pose.run_tracks --config configs/pku_v2.yaml --device cuda --all
 
 # TSU
-python -m eaa_pose.run_tracks --config configs/tsu.yaml --device cuda
+python -m eaa_pose.run_tracks --config configs/tsu.yaml --device cuda --all
+
+# Process only N pending videos and compare model/tracker choices
+python -m eaa_pose.run_tracks --config configs/pku_v1.yaml --device cuda \
+    --limit 20 --tracking-model yolo26n.pt --tracking-tracker bytetrack.yaml
 
 # Local smoke test
 python -m eaa_pose.run_tracks --config configs/pku_v1.yaml \
-    --device cpu --dry-run --smoke --max-videos 2 --max-frames 150 \
+    --device cpu --dry-run --limit 2 --max-frames 150 \
     --out-dir data/samples_out
 ```
+
+`run_tracks` resumes automatically: if
+`<out_dir>/tracks/<video_id>_tracks.json` already exists, that video is
+skipped.  After each newly processed video, its track JSON is written
+immediately.  `track_stats.json` is rebuilt from both existing and newly
+generated track files.
 
 ### Module 2B — Run pose estimation
 
@@ -139,6 +149,10 @@ Module 2A also writes:
 `track_stats.json` lists each non-`ok` status inside action segments by
 status (`no_detection`, `track_lost`, `multiple_person_candidates`,
 `read_failed`) so difficult videos can be reviewed quickly.
+
+Track timeline JSON stores only the fields needed by pose/review:
+`video_id`, `num_frames`, and per-frame `frame_index`, `inside_action`,
+`seg_ids`, `status`, `bbox`, `score`, `track_id`, `num_candidates`.
 
 Module 2B also writes:
 

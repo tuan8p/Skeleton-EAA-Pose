@@ -48,11 +48,15 @@ _CLI_TO_CONFIG: dict[str, str] = {
     "device":          "detector.device",
     # Note: estimator.device is resolved in PosePipeline._build_estimator()
     # by falling back to detector.device, so --device covers both.
+    "tracking_model":  "tracking.model",
+    "tracking_tracker": "tracking.tracker",
     "num_persons":     "output.num_persons",
     # smoke-test args (stored at top level)
     "smoke":           "smoke",
     "max_videos":      "max_videos",
     "max_frames":      "max_frames",
+    "limit":           "limit",
+    "all_videos":      "all",
     "dry_run":         "dry_run",
 }
 

@@ -174,7 +174,13 @@ class PosePipeline:
         self._videos_needing_review = []
 
         n_saved = 0
-        for entry in tqdm(entries, desc="Videos", unit="vid"):
+        for entry in tqdm(
+            entries,
+            desc="Pose videos",
+            unit="vid",
+            position=0,
+            dynamic_ncols=True,
+        ):
             try:
                 n_saved += self._process_video(entry)
             except Exception as exc:  # noqa: BLE001
@@ -227,7 +233,15 @@ class PosePipeline:
 
         # --- 3. Frame-by-frame pose extraction ---------------------------
         actual_frames = 0
-        for frame_idx in range(total_frames):
+        frame_iter = tqdm(
+            range(total_frames),
+            desc=f"Pose {entry.video_id}",
+            unit="frm",
+            leave=False,
+            position=1,
+            dynamic_ncols=True,
+        )
+        for frame_idx in frame_iter:
             ret, frame = cap.read()
             if not ret:
                 frame_statuses[frame_idx] = STATUS_READ_FAILED

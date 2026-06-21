@@ -32,6 +32,7 @@ from .track_io import (
     STATUS_READ_FAILED,
     STATUS_TRACK_LOST,
     action_frame_map,
+    read_json,
     summarize_track_timelines,
     track_path,
     write_json,
@@ -129,29 +130,43 @@ class TrackPipeline:
         dataset = self._load_dataset()
         entries = dataset.load()
 
-        is_smoke = bool(self._cfg.get("smoke", False))
-        max_videos = int(self._cfg.get("max_videos", len(entries)) or len(entries))
-        if is_smoke:
-            entries = entries[:max_videos]
-            print(f"[tracks][smoke] Processing {len(entries)} video(s)")
-
         out_dir = Path(self._cfg["out_dir"])
         tracks_dir = str(self._cfg.get("tracking.tracks_dir", "tracks"))
+        stats_filename = str(self._cfg.get("tracking.stats_filename", "track_stats.json"))
 
-        timelines: list[dict[str, Any]] = []
-        for entry in tqdm(entries, desc="Track videos", unit="vid"):
+        existing_timelines = self._load_existing_timelines(entries, out_dir, tracks_dir)
+        pending_entries = [
+            entry for entry in entries if entry.video_id not in existing_timelines
+        ]
+        selected_entries = self._select_entries(pending_entries)
+
+        print(
+            f"[tracks] total={len(entries)} existing={len(existing_timelines)} "
+            f"pending={len(pending_entries)} selected={len(selected_entries)}"
+        )
+
+        timelines_by_video = dict(existing_timelines)
+        self._write_stats(out_dir, stats_filename, timelines_by_video)
+
+        n_saved = 0
+        for entry in tqdm(
+            selected_entries,
+            desc="Track videos",
+            unit="vid",
+            position=0,
+            dynamic_ncols=True,
+        ):
             try:
                 timeline = self._process_video(entry)
             except Exception as exc:  # noqa: BLE001
                 warnings.warn(f"Track step failed on '{entry.video_id}': {exc}", stacklevel=2)
                 continue
-            timelines.append(timeline)
             write_json(track_path(out_dir, tracks_dir, entry.video_id), timeline)
+            timelines_by_video[entry.video_id] = timeline
+            self._write_stats(out_dir, stats_filename, timelines_by_video)
+            n_saved += 1
 
-        stats = summarize_track_timelines(timelines)
-        stats_filename = str(self._cfg.get("tracking.stats_filename", "track_stats.json"))
-        write_json(out_dir / stats_filename, stats)
-        print(f"\nDone. Saved {len(timelines)} track timeline(s) -> {out_dir / tracks_dir}")
+        print(f"\nDone. Saved {n_saved} new track timeline(s) -> {out_dir / tracks_dir}")
         print(f"Track stats -> {out_dir / stats_filename}")
 
     def _process_video(self, entry: VideoEntry) -> dict[str, Any]:
@@ -168,7 +183,15 @@ class TrackPipeline:
         action_mask, frame_seg_ids = action_frame_map(entry.segments, total_frames)
         frames: list[dict[str, Any]] = []
 
-        for frame_idx in range(total_frames):
+        frame_iter = tqdm(
+            range(total_frames),
+            desc=f"Track {entry.video_id}",
+            unit="frm",
+            leave=False,
+            position=1,
+            dynamic_ncols=True,
+        )
+        for frame_idx in frame_iter:
             ret, frame = cap.read()
             inside_action = bool(action_mask[frame_idx])
             seg_ids = frame_seg_ids[frame_idx]
@@ -216,13 +239,51 @@ class TrackPipeline:
 
         return {
             "video_id": entry.video_id,
-            "video_path": str(entry.video_path),
             "num_frames": len(frames),
-            "detector": str(self._cfg.get("tracking.model", "yolo26s.pt")),
-            "tracker": str(self._cfg.get("tracking.tracker", "bytetrack.yaml")),
-            "person_only": True,
             "frames": frames,
         }
+
+    def _load_existing_timelines(
+        self,
+        entries: list[VideoEntry],
+        out_dir: Path,
+        tracks_dir: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Load existing track files for dataset entries so resume is cheap."""
+        timelines: dict[str, dict[str, Any]] = {}
+        for entry in entries:
+            path = track_path(out_dir, tracks_dir, entry.video_id)
+            if not path.exists():
+                continue
+            try:
+                timelines[entry.video_id] = read_json(path)
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(f"Could not read existing track file '{path}': {exc}", stacklevel=2)
+        return timelines
+
+    def _select_entries(self, pending_entries: list[VideoEntry]) -> list[VideoEntry]:
+        """Select pending videos according to --all / --limit / smoke flags."""
+        if bool(self._cfg.get("all", False)):
+            return pending_entries
+
+        limit = self._cfg.get("limit", None)
+        if limit is not None:
+            return pending_entries[: max(0, int(limit))]
+
+        if bool(self._cfg.get("smoke", False)):
+            max_videos = int(self._cfg.get("max_videos", len(pending_entries)) or len(pending_entries))
+            return pending_entries[:max_videos]
+
+        return pending_entries
+
+    @staticmethod
+    def _write_stats(
+        out_dir: Path,
+        stats_filename: str,
+        timelines_by_video: dict[str, dict[str, Any]],
+    ) -> None:
+        timelines = [timelines_by_video[k] for k in sorted(timelines_by_video)]
+        write_json(out_dir / stats_filename, summarize_track_timelines(timelines))
 
     @staticmethod
     def _status_for_action_frame(candidates: list[dict[str, Any]]) -> str:
@@ -317,6 +378,32 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--actions-xlsx", dest="actions_xlsx", default=None)
     p.add_argument("--out-dir", dest="out_dir", default=None)
     p.add_argument("--device", dest="device", default=None)
+    p.add_argument(
+        "--tracking-model",
+        dest="tracking_model",
+        default=None,
+        help="YOLO model/checkpoint for person tracking, e.g. yolo26n.pt or yolo26s.pt.",
+    )
+    p.add_argument(
+        "--tracking-tracker",
+        dest="tracking_tracker",
+        default=None,
+        help="Ultralytics tracker config, e.g. bytetrack.yaml or botsort.yaml.",
+    )
+    p.add_argument(
+        "--limit",
+        dest="limit",
+        type=int,
+        default=None,
+        help="Process at most N pending videos that do not already have track JSON.",
+    )
+    p.add_argument(
+        "--all",
+        dest="all_videos",
+        action="store_true",
+        default=None,
+        help="Process all pending videos that do not already have track JSON.",
+    )
     p.add_argument("--smoke", dest="smoke", action="store_true", default=None)
     p.add_argument("--max-videos", dest="max_videos", type=int, default=None)
     p.add_argument("--max-frames", dest="max_frames", type=int, default=None)
