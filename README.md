@@ -68,9 +68,11 @@ python -m eaa_pose.run_tracks --config configs/pku_v2.yaml --device cuda --all
 # TSU
 python -m eaa_pose.run_tracks --config configs/tsu.yaml --device cuda --all
 
-# Process only N pending videos and compare model/tracker choices
+# Process at most N pending videos, not counting existing track files.
+# Useful for incremental runs and model/tracker comparisons.
 python -m eaa_pose.run_tracks --config configs/pku_v1.yaml --device cuda \
-    --limit 20 --tracking-model yolo26n.pt --tracking-tracker bytetrack.yaml
+    --limit 20 --tracking-model yolo26n.pt --tracking-tracker bytetrack.yaml \
+    --tracking-imgsz 480 --tracking-half
 
 # Local smoke test
 python -m eaa_pose.run_tracks --config configs/pku_v1.yaml \
@@ -82,7 +84,8 @@ python -m eaa_pose.run_tracks --config configs/pku_v1.yaml \
 `<out_dir>/tracks/<video_id>_tracks.json` already exists, that video is
 skipped.  After each newly processed video, its track JSON is written
 immediately.  `track_stats.json` is rebuilt from both existing and newly
-generated track files.
+generated track files.  `--limit N` processes at most N pending videos after
+existing track files have been skipped.
 
 ### Module 2B — Run pose estimation
 
@@ -153,6 +156,17 @@ status (`no_detection`, `track_lost`, `multiple_person_candidates`,
 Track timeline JSON stores only the fields needed by pose/review:
 `video_id`, `num_frames`, and per-frame `frame_index`, `inside_action`,
 `seg_ids`, `status`, `bbox`, `score`, `track_id`, `num_candidates`.
+
+For speed on Colab T4, `run_tracks` streams the whole video through YOLO once
+instead of calling YOLO frame-by-frame.  The fastest recommended comparison
+setting is usually:
+
+```bash
+--tracking-model yolo26n.pt --tracking-imgsz 480 --tracking-half
+```
+
+Use `yolo26s.pt` and/or `--tracking-imgsz 640` when detection quality matters
+more than throughput.
 
 Module 2B also writes:
 
