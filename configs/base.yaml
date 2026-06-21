@@ -4,7 +4,8 @@
 # =============================================================
 
 # ------------------------------------------------------------------
-# Person detector (RTMDet)
+# Legacy person detector (RTMDet). Kept for older experiments; Module 2A
+# now uses YOLO tracking by default.
 # ------------------------------------------------------------------
 detector:
   config: rtmdet_nano_320-8xb32_coco-person.py
@@ -25,6 +26,18 @@ tracker:
   max_lost: 30
   # min_hits: frames before a new track is confirmed
   min_hits: 3
+
+# ------------------------------------------------------------------
+# Module 2A person-only detection/tracking (YOLO + ByteTrack)
+# ------------------------------------------------------------------
+tracking:
+  model: yolo26s.pt
+  tracker: bytetrack.yaml
+  classes: [0]
+  conf: 0.25
+  imgsz: 640
+  tracks_dir: tracks
+  stats_filename: track_stats.json
 
 # ------------------------------------------------------------------
 # Pose estimator (RTMW3D whole-body, 133 keypoints)
@@ -66,6 +79,9 @@ qc_report:
   filename_template: qc/{video_id}_qc.json
   long_gap_threshold: 10
   include_frame_statuses: false
+
+pose_stats:
+  filename: pose_stats.json
 
 # ------------------------------------------------------------------
 # Output

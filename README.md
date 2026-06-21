@@ -11,7 +11,8 @@ normalized 3-D 25-joint skeletons in NTU-120 format.
 | Module | Script | Purpose |
 |--------|--------|---------|
 | 1 | `filter_pku_interactions` | Filter PKU-MMD v1 by highlighted rows in Actions_v2.xlsx; output filtered labels, skeletons + Actions_daily.csv |
-| 2 | `run_pose` | RGB → RTMDet → ByteTrack → RTMW3D → 25-joint QC → per-sample `.npy` |
+| 2A | `run_tracks` | RGB → YOLO26s person-only detection → ByteTrack → per-video track timeline + track stats |
+| 2B | `run_pose` | Track timeline bbox → RTMW3D → NTU-25 QC → SkateFormer `.npy` + metadata + pose stats |
 
 ---
 
@@ -55,7 +56,25 @@ python -m eaa_pose.filter_pku_interactions --config configs/pku_v1.yaml \
     --src-actions-xlsx Actions_v2.xlsx --out-actions-csv out/Actions_daily.csv
 ```
 
-### Module 2 — Run pose estimation
+### Module 2A — Run person detection/tracking
+
+```bash
+# PKU-MMD v1 (Colab, GPU)
+python -m eaa_pose.run_tracks --config configs/pku_v1.yaml --device cuda
+
+# PKU-MMD v2
+python -m eaa_pose.run_tracks --config configs/pku_v2.yaml --device cuda
+
+# TSU
+python -m eaa_pose.run_tracks --config configs/tsu.yaml --device cuda
+
+# Local smoke test
+python -m eaa_pose.run_tracks --config configs/pku_v1.yaml \
+    --device cpu --dry-run --smoke --max-videos 2 --max-frames 150 \
+    --out-dir data/samples_out
+```
+
+### Module 2B — Run pose estimation
 
 ```bash
 # PKU-MMD v1 (Colab, GPU)
@@ -69,9 +88,12 @@ python -m eaa_pose.run_pose --config configs/tsu.yaml --device cuda
 
 # Local CPU smoke test (2 videos, 150 frames max each)
 python -m eaa_pose.run_pose --config configs/pku_v1.yaml \
-    --device cpu --smoke --max-videos 2 --max-frames 150 \
+    --device cpu --dry-run --smoke --max-videos 2 --max-frames 150 \
     --out-dir data/samples_out
 ```
+
+`run_pose` expects matching track files from `run_tracks` in
+`<out_dir>/tracks/`.
 
 ---
 
@@ -107,6 +129,26 @@ Each processed video also gets a separate QC report:
 <out_dir>/qc/<video_id>_qc.json
 ```
 
+Module 2A also writes:
+
+```
+<out_dir>/tracks/<video_id>_tracks.json
+<out_dir>/track_stats.json
+```
+
+`track_stats.json` lists each non-`ok` status inside action segments by
+status (`no_detection`, `track_lost`, `multiple_person_candidates`,
+`read_failed`) so difficult videos can be reviewed quickly.
+
+Module 2B also writes:
+
+```
+<out_dir>/pose_stats.json
+```
+
+`pose_stats.json` lists missing track files, pose failures, and videos/segments
+that need QC review.
+
 ---
 
 ## Config system
@@ -121,6 +163,6 @@ Any explicit CLI argument overrides the matching config value.
 
 | Dataset | Videos | Segments |
 |---------|--------|---------|
-| PKU v1 | `/content/drive/MyDrive/.../RGB_VIDEO` | filtered `Label_PKUMMDv1_daily/` (Module 1 output) |
-| PKU v2 | `/content/drive/MyDrive/.../RGB_VIDEO_v2` | `/content/drive/MyDrive/.../Label_PKUMMD_v2` |
-| TSU | `/content/drive/MyDrive/.../Videos_mp4` | `/content/drive/MyDrive/.../Annotation_v1.0` |
+| PKU v1 | `/content/drive/MyDrive/ĐACN-TN_datasets/ĐATN/rawdatasets/videos/PKUv1` | `/content/drive/MyDrive/ĐACN-TN_datasets/ĐATN/rawdatasets/PKU_MMD_v1/Label_daily` |
+| PKU v2 | `/content/drive/MyDrive/ĐACN-TN_datasets/ĐATN/rawdatasets/PKU_MMD_v2/RGB` | `/content/drive/MyDrive/ĐACN-TN_datasets/ĐATN/rawdatasets/PKU_MMD_v2/Label` |
+| TSU | `/content/drive/MyDrive/ĐACN-TN_datasets/ĐATN/rawdatasets/TSU/mp4` | `/content/drive/MyDrive/ĐACN-TN_datasets/ĐATN/rawdatasets/TSU/Annotation_v1.0` |

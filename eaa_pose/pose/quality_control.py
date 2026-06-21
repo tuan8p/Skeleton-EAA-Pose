@@ -125,7 +125,12 @@ class SkeletonQC:
     # Public API
     # ------------------------------------------------------------------
 
-    def process(self, sequence: np.ndarray) -> np.ndarray:
+    def process(
+        self,
+        sequence: np.ndarray,
+        frame_statuses: list[str] | None = None,
+        protected_statuses: tuple[str, ...] = ("no_detection",),
+    ) -> np.ndarray:
         """Apply the full QC pipeline to a skeleton sequence.
 
         Parameters
@@ -134,6 +139,14 @@ class SkeletonQC:
             Array of shape ``(T, M, 25, 6)`` — raw skeleton sequence
             where channel 3 is confidence and channels 4–5 are
             initialised to 1 / 0 respectively.
+        frame_statuses:
+            Optional per-frame pose extraction status. Frames whose status
+            appears in ``protected_statuses`` are treated as semantic missing
+            regions and are not reconstructed.
+        protected_statuses:
+            Frame statuses that must remain missing. By default,
+            ``no_detection`` is protected because it can mean the person is
+            truly absent, not merely that a joint estimate is noisy.
 
         Returns
         -------
@@ -141,9 +154,10 @@ class SkeletonQC:
         ``reconstructed_flag`` channels filled in.
         """
         seq = sequence.copy()
+        protected_frames = self._protected_frames(seq.shape[0], frame_statuses, protected_statuses)
 
         self._apply_confidence_threshold(seq)
-        self._interpolate_gaps(seq)
+        self._interpolate_gaps(seq, protected_frames=protected_frames)
         self._temporal_smooth(seq)
         if self.normalize:
             self._normalize(seq)
@@ -254,20 +268,26 @@ class SkeletonQC:
         seq[low_conf, _MASK] = 0.0
         seq[low_conf, _X:_Z+1] = 0.0   # zero out coordinates too
 
-    def _interpolate_gaps(self, seq: np.ndarray) -> None:
+    def _interpolate_gaps(
+        self,
+        seq: np.ndarray,
+        protected_frames: np.ndarray | None = None,
+    ) -> None:
         """Linear interpolation over short missing-joint runs.
 
         For each person ``m`` and joint ``j``, if there is a run of
         ``valid_mask == 0`` frames of length ≤ ``max_interp_gap`` AND
         the run is bounded by valid frames on both sides, fill the gap
         with linear interpolation and set ``reconstructed_flag = 1``.
+        Runs containing protected frames are left invalid.
         """
         T, M, J, _ = seq.shape
+        if protected_frames is None:
+            protected_frames = np.zeros(T, dtype=bool)
 
         for m in range(M):
             for j in range(J):
                 valid = seq[:, m, j, _MASK].astype(bool)  # (T,)
-                frames = np.arange(T)
 
                 # Find contiguous invalid runs
                 i = 0
@@ -284,6 +304,8 @@ class SkeletonQC:
                     gap_len = run_end - run_start + 1
                     if gap_len > self.max_interp_gap:
                         continue   # too long to interpolate
+                    if protected_frames[run_start : run_end + 1].any():
+                        continue   # semantic missing region; keep invalid
 
                     # Check bounding valid frames
                     left  = run_start - 1
@@ -341,14 +363,29 @@ class SkeletonQC:
                     if mask.sum() < win:
                         continue   # not enough valid frames
 
-                    # Smooth only valid + reconstructed frames
-                    smoothed = savgol_filter(
-                        signal,
-                        window_length=win,
-                        polyorder=self.smooth_polyorder,
-                        mode="nearest",
-                    )
-                    seq[:, m, j, ch] = smoothed
+                    # Smooth only contiguous valid runs so missing/protected
+                    # frames do not get hallucinated or affect neighbours.
+                    i = 0
+                    while i < T:
+                        if not mask[i]:
+                            i += 1
+                            continue
+
+                        run_start = i
+                        while i < T and mask[i]:
+                            i += 1
+                        run_end = i
+                        run_len = run_end - run_start
+                        if run_len < win:
+                            continue
+
+                        smoothed = savgol_filter(
+                            signal[run_start:run_end],
+                            window_length=win,
+                            polyorder=self.smooth_polyorder,
+                            mode="nearest",
+                        )
+                        seq[run_start:run_end, m, j, ch] = smoothed
 
     def _normalize(self, seq: np.ndarray) -> None:
         """Root-center + torso-length normalization.
@@ -399,3 +436,20 @@ class SkeletonQC:
             else:
                 current = 0
         return int(longest)
+
+    @staticmethod
+    def _protected_frames(
+        num_frames: int,
+        frame_statuses: list[str] | None,
+        protected_statuses: tuple[str, ...],
+    ) -> np.ndarray:
+        """Return a boolean mask of frames that QC must not reconstruct."""
+        protected = np.zeros(num_frames, dtype=bool)
+        if frame_statuses is None:
+            return protected
+
+        protected_set = set(protected_statuses)
+        limit = min(num_frames, len(frame_statuses))
+        for i in range(limit):
+            protected[i] = frame_statuses[i] in protected_set
+        return protected
