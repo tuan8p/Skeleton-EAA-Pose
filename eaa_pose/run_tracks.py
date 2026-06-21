@@ -184,15 +184,7 @@ class TrackPipeline:
         action_mask, frame_seg_ids = action_frame_map(entry.segments, total_frames)
         frames: list[dict[str, Any]] = []
 
-        frame_iter = tqdm(
-            range(total_frames),
-            desc=f"Track {entry.video_id}",
-            unit="frm",
-            leave=False,
-            position=1,
-            dynamic_ncols=True,
-        )
-        for frame_idx in frame_iter:
+        for frame_idx in range(total_frames):
             ret, frame = cap.read()
             inside_action = bool(action_mask[frame_idx])
             seg_ids = frame_seg_ids[frame_idx]

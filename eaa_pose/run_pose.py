@@ -233,15 +233,7 @@ class PosePipeline:
 
         # --- 3. Frame-by-frame pose extraction ---------------------------
         actual_frames = 0
-        frame_iter = tqdm(
-            range(total_frames),
-            desc=f"Pose {entry.video_id}",
-            unit="frm",
-            leave=False,
-            position=1,
-            dynamic_ncols=True,
-        )
-        for frame_idx in frame_iter:
+        for frame_idx in range(total_frames):
             ret, frame = cap.read()
             if not ret:
                 frame_statuses[frame_idx] = STATUS_READ_FAILED
