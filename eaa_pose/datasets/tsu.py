@@ -129,7 +129,7 @@ class TSUDataset(BaseDataset):
         """Return a dict mapping ``lower(video_stem) → video_path``."""
         lookup: dict[str, Path] = {}
         ext = self._video_ext.lower()
-        for p in self._video_dir.iterdir():
+        for p in self._video_dir.rglob(f"*{self._video_ext}"):
             if p.suffix.lower() == ext:
                 lookup[p.stem.lower()] = p
         return lookup

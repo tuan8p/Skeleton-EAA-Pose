@@ -36,6 +36,7 @@ Usage
 from __future__ import annotations
 
 import csv
+import warnings
 import openpyxl
 from pathlib import Path
 
@@ -91,20 +92,33 @@ class PKUDataset(BaseDataset):
         if self._entries is not None:
             return self._entries
 
+        if not self._segments_dir.exists():
+            warnings.warn(f"PKU: segments_dir does not exist: {self._segments_dir}", stacklevel=2)
+            self._entries = []
+            return self._entries
+        if not self._video_dir.exists():
+            warnings.warn(f"PKU: video_dir does not exist: {self._video_dir}", stacklevel=2)
+            self._entries = []
+            return self._entries
+
         actions = self._load_actions()
         entries: list[VideoEntry] = []
+        video_lookup = self._build_video_lookup()
+        label_files = sorted(self._segments_dir.rglob("*.txt"))
 
-        for label_path in sorted(self._segments_dir.glob("*.txt")):
+        missing_videos: list[str] = []
+        empty_segments = 0
+        for label_path in label_files:
             video_id = label_path.stem
-            video_path = self._video_dir / (video_id + self._video_ext)
+            video_path = video_lookup.get(video_id.lower())
 
-            if not video_path.exists():
-                # Video missing — skip silently (common when working with
-                # a partial local copy)
+            if video_path is None:
+                missing_videos.append(video_id)
                 continue
 
             segments = self._parse_label_file(label_path, actions)
             if not segments:
+                empty_segments += 1
                 continue
 
             entries.append(
@@ -116,6 +130,16 @@ class PKUDataset(BaseDataset):
             )
 
         self._entries = sorted(entries, key=lambda e: e.video_id)
+        if not self._entries:
+            warnings.warn(
+                "PKU: no matched videos loaded. "
+                f"labels_found={len(label_files)}, videos_found={len(video_lookup)}, "
+                f"missing_video_matches={len(missing_videos)}, empty_label_files={empty_segments}. "
+                f"segments_dir={self._segments_dir}, video_dir={self._video_dir}, "
+                f"video_ext={self._video_ext}. "
+                f"missing_examples={missing_videos[:5]}",
+                stacklevel=2,
+            )
         return self._entries
 
     def __len__(self) -> int:
@@ -124,6 +148,16 @@ class PKUDataset(BaseDataset):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _build_video_lookup(self) -> dict[str, Path]:
+        """Return lower-case video stem -> video path, scanning recursively."""
+        lookup: dict[str, Path] = {}
+        ext = self._video_ext.lower()
+        for path in sorted(self._video_dir.rglob(f"*{self._video_ext}")):
+            if path.suffix.lower() != ext:
+                continue
+            lookup.setdefault(path.stem.lower(), path)
+        return lookup
 
     def _load_actions(self) -> dict[int, str]:
         """Load label_id → action_name mapping from Actions.xlsx or .csv.

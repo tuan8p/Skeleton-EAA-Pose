@@ -129,6 +129,7 @@ class TrackPipeline:
     def run(self) -> None:
         dataset = self._load_dataset()
         entries = dataset.load()
+        print(f"[tracks] Loaded {len(entries)} matched video(s) from dataset adapter")
 
         out_dir = Path(self._cfg["out_dir"])
         tracks_dir = str(self._cfg.get("tracking.tracks_dir", "tracks"))
