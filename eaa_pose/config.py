@@ -50,9 +50,6 @@ _CLI_TO_CONFIG: dict[str, str] = {
     # by falling back to detector.device, so --device covers both.
     "tracking_model":  "tracking.model",
     "tracking_tracker": "tracking.tracker",
-    "tracking_imgsz": "tracking.imgsz",
-    "tracking_conf": "tracking.conf",
-    "tracking_half": "tracking.half",
     "num_persons":     "output.num_persons",
     # smoke-test args (stored at top level)
     "smoke":           "smoke",

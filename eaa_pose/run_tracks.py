@@ -52,21 +52,6 @@ class _MockYOLOTracker:
             }
         ]
 
-    def track_video(
-        self,
-        video_path: str | Path,
-        max_frames: int,
-    ):
-        cap = cv2.VideoCapture(str(video_path))
-        try:
-            for _ in range(max_frames):
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                yield self.track_frame(frame)
-        finally:
-            cap.release()
-
 
 class _UltralyticsYOLOTracker:
     """YOLO person-only tracker wrapper."""
@@ -79,7 +64,6 @@ class _UltralyticsYOLOTracker:
         conf: float,
         imgsz: int,
         device: str,
-        half: bool,
     ) -> None:
         try:
             from ultralytics import YOLO  # type: ignore
@@ -95,7 +79,6 @@ class _UltralyticsYOLOTracker:
         self._conf = conf
         self._imgsz = imgsz
         self._device = device
-        self._half = half
 
     def track_frame(self, frame: np.ndarray) -> list[dict[str, Any]]:
         results = self._model.track(
@@ -106,39 +89,12 @@ class _UltralyticsYOLOTracker:
             conf=self._conf,
             imgsz=self._imgsz,
             device=self._device,
-            half=self._half,
             verbose=False,
         )
         if not results:
             return []
 
-        return self._parse_result(results[0])
-
-    def track_video(
-        self,
-        video_path: str | Path,
-        max_frames: int,
-    ):
-        results = self._model.track(
-            source=str(video_path),
-            classes=self._classes,
-            tracker=self._tracker_name,
-            persist=True,
-            stream=True,
-            conf=self._conf,
-            imgsz=self._imgsz,
-            device=self._device,
-            half=self._half,
-            verbose=False,
-        )
-        for frame_idx, result in enumerate(results):
-            if frame_idx >= max_frames:
-                break
-            yield self._parse_result(result)
-
-    @staticmethod
-    def _parse_result(result) -> list[dict[str, Any]]:
-        boxes = getattr(result, "boxes", None)
+        boxes = getattr(results[0], "boxes", None)
         if boxes is None or len(boxes) == 0:
             return []
 
@@ -220,19 +176,31 @@ class TrackPipeline:
         cap = cv2.VideoCapture(str(entry.video_path))
         if not cap.isOpened():
             raise OSError(f"Cannot open video: {entry.video_path}")
+
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
         if max_frames > 0:
             total_frames = min(total_frames, max_frames)
 
         action_mask, frame_seg_ids = action_frame_map(entry.segments, total_frames)
         frames: list[dict[str, Any]] = []
 
-        tracker = self._get_tracker()
-        candidate_iter = tracker.track_video(entry.video_path, total_frames)
-        for frame_idx, candidates in enumerate(candidate_iter):
+        for frame_idx in range(total_frames):
+            ret, frame = cap.read()
             inside_action = bool(action_mask[frame_idx])
             seg_ids = frame_seg_ids[frame_idx]
+
+            if not ret:
+                frames.append(
+                    self._frame_record(
+                        frame_idx=frame_idx,
+                        inside_action=inside_action,
+                        seg_ids=seg_ids,
+                        status=STATUS_READ_FAILED if inside_action else STATUS_OUTSIDE_ACTION,
+                    )
+                )
+                continue
+
+            candidates = self._get_tracker().track_frame(frame)
             selected = candidates[0] if candidates else None
 
             if not inside_action:
@@ -260,17 +228,7 @@ class TrackPipeline:
                 )
             )
 
-        for frame_idx in range(len(frames), total_frames):
-            inside_action = bool(action_mask[frame_idx])
-            seg_ids = frame_seg_ids[frame_idx]
-            frames.append(
-                self._frame_record(
-                    frame_idx=frame_idx,
-                    inside_action=inside_action,
-                    seg_ids=seg_ids,
-                    status=STATUS_READ_FAILED if inside_action else STATUS_OUTSIDE_ACTION,
-                )
-            )
+        cap.release()
 
         return {
             "video_id": entry.video_id,
@@ -297,11 +255,7 @@ class TrackPipeline:
         return timelines
 
     def _select_entries(self, pending_entries: list[VideoEntry]) -> list[VideoEntry]:
-        """Select pending videos according to --all / --limit / smoke flags.
-
-        ``--limit N`` means "process at most N pending videos", not counting
-        existing track JSON files.
-        """
+        """Select pending videos according to --all / --limit / smoke flags."""
         if bool(self._cfg.get("all", False)):
             return pending_entries
 
@@ -375,7 +329,6 @@ class TrackPipeline:
             device=self._normalize_device(
                 str(self._cfg.get("tracking.device", self._cfg.get("detector.device", "cuda")))
             ),
-            half=bool(self._cfg.get("tracking.half", True)),
         )
         return self._tracker
 
@@ -429,34 +382,6 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="tracking_tracker",
         default=None,
         help="Ultralytics tracker config, e.g. bytetrack.yaml or botsort.yaml.",
-    )
-    p.add_argument(
-        "--tracking-imgsz",
-        dest="tracking_imgsz",
-        type=int,
-        default=None,
-        help="YOLO inference image size. Lower is faster, e.g. 480; 640 is default.",
-    )
-    p.add_argument(
-        "--tracking-conf",
-        dest="tracking_conf",
-        type=float,
-        default=None,
-        help="YOLO confidence threshold for person detection.",
-    )
-    p.add_argument(
-        "--tracking-half",
-        dest="tracking_half",
-        action="store_true",
-        default=None,
-        help="Enable FP16 inference for YOLO tracking.",
-    )
-    p.add_argument(
-        "--no-tracking-half",
-        dest="tracking_half",
-        action="store_false",
-        default=None,
-        help="Disable FP16 inference for YOLO tracking.",
     )
     p.add_argument(
         "--limit",

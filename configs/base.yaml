@@ -36,7 +36,6 @@ tracking:
   classes: [0]
   conf: 0.25
   imgsz: 640
-  half: true
   tracks_dir: tracks
   stats_filename: track_stats.json
 
