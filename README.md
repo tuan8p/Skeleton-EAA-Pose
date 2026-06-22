@@ -12,6 +12,7 @@ normalized 3-D 25-joint skeletons in NTU-120 format.
 |--------|--------|---------|
 | 1 | `filter_pku_interactions` | Filter PKU-MMD v1 by highlighted rows in Actions_v2.xlsx; output filtered labels, skeletons + Actions_daily.csv |
 | 2A | `run_tracks` | RGB → YOLO26s person-only detection → ByteTrack → per-video track timeline + track stats |
+| 2A_QC | `run_track_qc_retry`, `run_track_qc_interpolate` | Retry no-detection videos, then interpolate short no-detection bbox gaps |
 | 2B | `run_pose` | Track timeline bbox → RTMW3D → NTU-25 QC → SkateFormer `.npy` + metadata + pose stats |
 
 ---
@@ -94,6 +95,28 @@ the full video list sorted by `video_id` (`start` inclusive, `end` exclusive).
 After that range is selected, existing track files in the range are skipped.
 `--limit N` then processes at most N remaining pending videos in that range.
 
+### Module 2A_QC — Retry and interpolate track timelines
+
+```bash
+# 2A_QC_1: retry videos with no_detection inside action frames.
+# This overwrites tracks/<video_id>_tracks.json and rebuilds track_stats.json.
+python -m eaa_pose.run_track_qc_retry --config configs/pku_v1.yaml --device cuda
+
+# 2A_QC_2: interpolate short no_detection bbox gaps.
+# This overwrites tracks/<video_id>_tracks.json and writes track_stats_qc.json.
+python -m eaa_pose.run_track_qc_interpolate --config configs/pku_v1.yaml \
+    --max-gap 10
+```
+
+Interpolated frames keep the original status for review:
+
+```json
+{
+  "status": "interpolated_no_detection",
+  "original_status": "no_detection"
+}
+```
+
 ### Module 2B — Run pose estimation
 
 ```bash
@@ -154,11 +177,14 @@ Module 2A also writes:
 ```
 <out_dir>/tracks/<video_id>_tracks.json
 <out_dir>/track_stats.json
+<out_dir>/track_stats_qc.json
 ```
 
 `track_stats.json` lists each non-`ok` status inside action segments by
 status (`no_detection`, `track_lost`, `multiple_person_candidates`,
 `read_failed`) so difficult videos can be reviewed quickly.
+`track_stats_qc.json` has the same schema after 2A_QC_2 and may also include
+`interpolated_no_detection`.
 
 Track timeline JSON stores only the fields needed by pose/review:
 `video_id`, `num_frames`, and per-frame `frame_index`, `inside_action`,

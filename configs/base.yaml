@@ -39,6 +39,9 @@ tracking:
   tracks_dir: tracks
   stats_filename: track_stats.json
 
+track_qc:
+  stats_filename: track_stats_qc.json
+
 # ------------------------------------------------------------------
 # Pose estimator (RTMW3D whole-body, 133 keypoints)
 # ------------------------------------------------------------------

@@ -60,6 +60,7 @@ _CLI_TO_CONFIG: dict[str, str] = {
     "end_index":       "end_index",
     "all_videos":      "all",
     "dry_run":         "dry_run",
+    "track_qc_max_interp_gap": "track_qc.max_interp_gap",
 }
 
 

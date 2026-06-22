@@ -21,6 +21,7 @@ STATUS_NO_DETECTION = "no_detection"
 STATUS_TRACK_LOST = "track_lost"
 STATUS_MULTIPLE_PERSON_CANDIDATES = "multiple_person_candidates"
 STATUS_READ_FAILED = "read_failed"
+STATUS_INTERPOLATED_NO_DETECTION = "interpolated_no_detection"
 STATUS_UNREAD = "unread"
 
 REVIEW_STATUSES = (
@@ -28,6 +29,7 @@ REVIEW_STATUSES = (
     STATUS_TRACK_LOST,
     STATUS_MULTIPLE_PERSON_CANDIDATES,
     STATUS_READ_FAILED,
+    STATUS_INTERPOLATED_NO_DETECTION,
 )
 
 
@@ -70,7 +72,7 @@ def write_json(path: str | Path, payload: dict[str, Any]) -> Path:
 
 def read_json(path: str | Path) -> dict[str, Any]:
     """Read a JSON object from disk."""
-    with Path(path).open("r", encoding="utf-8") as fh:
+    with Path(path).open("r", encoding="utf-8-sig") as fh:
         data = json.load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object in {path}")
