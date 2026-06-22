@@ -12,8 +12,8 @@ File conventions
         label_id,start_frame,end_frame,confidence
 
 * **Video files**: ``<video_id>.<ext>`` (typically ``.avi`` for v1,
-  may vary for v2).  The stem of the video file must match the stem of
-  the label file.
+  may vary for v2).  PKU-MMD v2 may store RGB videos as either
+  ``<video_id>.<ext>`` or ``<video_id>_color.<ext>``; both are resolved.
 
 * **Actions file** (``.xlsx`` or ``.csv``): columns ``Label`` (int) and ``Action`` (str).
   Used to resolve ``label_id → label_name``.
@@ -150,13 +150,24 @@ class PKUDataset(BaseDataset):
     # ------------------------------------------------------------------
 
     def _build_video_lookup(self) -> dict[str, Path]:
-        """Return lower-case video stem -> video path, scanning recursively."""
+        """Return lower-case video stem/alias -> video path.
+
+        PKU-MMD v2 RGB files are inconsistent in practice: some videos use
+        ``<video_id>.avi`` while others use ``<video_id>_color.avi``.  Exact
+        stems are registered first, then safe aliases are added with
+        ``setdefault`` so an exact file always wins when both forms exist.
+        """
         lookup: dict[str, Path] = {}
         ext = self._video_ext.lower()
         for path in sorted(self._video_dir.rglob(f"*{self._video_ext}")):
             if path.suffix.lower() != ext:
                 continue
-            lookup.setdefault(path.stem.lower(), path)
+            stem = path.stem.lower()
+            lookup.setdefault(stem, path)
+            if stem.endswith("_color"):
+                lookup.setdefault(stem[: -len("_color")], path)
+            else:
+                lookup.setdefault(f"{stem}_color", path)
         return lookup
 
     def _load_actions(self) -> dict[int, str]:
