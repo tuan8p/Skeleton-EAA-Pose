@@ -52,6 +52,21 @@ class _MockYOLOTracker:
             }
         ]
 
+    def track_video(
+        self,
+        video_path: str | Path,
+        max_frames: int,
+    ):
+        cap = cv2.VideoCapture(str(video_path))
+        try:
+            for _ in range(max_frames):
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                yield self.track_frame(frame)
+        finally:
+            cap.release()
+
 
 class _UltralyticsYOLOTracker:
     """YOLO person-only tracker wrapper."""
@@ -98,6 +113,28 @@ class _UltralyticsYOLOTracker:
             return []
 
         return self._parse_result(results[0])
+
+    def track_video(
+        self,
+        video_path: str | Path,
+        max_frames: int,
+    ):
+        results = self._model.track(
+            source=str(video_path),
+            classes=self._classes,
+            tracker=self._tracker_name,
+            persist=True,
+            stream=True,
+            conf=self._conf,
+            imgsz=self._imgsz,
+            device=self._device,
+            half=self._half,
+            verbose=False,
+        )
+        for frame_idx, result in enumerate(results):
+            if frame_idx >= max_frames:
+                break
+            yield self._parse_result(result)
 
     @staticmethod
     def _parse_result(result) -> list[dict[str, Any]]:
@@ -183,8 +220,8 @@ class TrackPipeline:
         cap = cv2.VideoCapture(str(entry.video_path))
         if not cap.isOpened():
             raise OSError(f"Cannot open video: {entry.video_path}")
-
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
         if max_frames > 0:
             total_frames = min(total_frames, max_frames)
 
@@ -192,24 +229,10 @@ class TrackPipeline:
         frames: list[dict[str, Any]] = []
 
         tracker = self._get_tracker()
-
-        for frame_idx in range(total_frames):
-            ret, frame = cap.read()
+        candidate_iter = tracker.track_video(entry.video_path, total_frames)
+        for frame_idx, candidates in enumerate(candidate_iter):
             inside_action = bool(action_mask[frame_idx])
             seg_ids = frame_seg_ids[frame_idx]
-
-            if not ret:
-                frames.append(
-                    self._frame_record(
-                        frame_idx=frame_idx,
-                        inside_action=inside_action,
-                        seg_ids=seg_ids,
-                        status=STATUS_READ_FAILED if inside_action else STATUS_OUTSIDE_ACTION,
-                    )
-                )
-                continue
-
-            candidates = tracker.track_frame(frame)
             selected = candidates[0] if candidates else None
 
             if not inside_action:
@@ -237,7 +260,17 @@ class TrackPipeline:
                 )
             )
 
-        cap.release()
+        for frame_idx in range(len(frames), total_frames):
+            inside_action = bool(action_mask[frame_idx])
+            seg_ids = frame_seg_ids[frame_idx]
+            frames.append(
+                self._frame_record(
+                    frame_idx=frame_idx,
+                    inside_action=inside_action,
+                    seg_ids=seg_ids,
+                    status=STATUS_READ_FAILED if inside_action else STATUS_OUTSIDE_ACTION,
+                )
+            )
 
         return {
             "video_id": entry.video_id,

@@ -157,9 +157,9 @@ Track timeline JSON stores only the fields needed by pose/review:
 `video_id`, `num_frames`, and per-frame `frame_index`, `inside_action`,
 `seg_ids`, `status`, `bbox`, `score`, `track_id`, `num_candidates`.
 
-`run_tracks` reads frames with OpenCV and runs YOLO tracking frame-by-frame
-with persistent tracker state.  The fastest recommended comparison setting is
-usually:
+For speed on Colab T4, `run_tracks` streams the whole video through YOLO once
+instead of calling YOLO frame-by-frame.  The fastest recommended comparison
+setting is usually:
 
 ```bash
 --tracking-model yolo26n.pt --tracking-imgsz 480 --tracking-half
