@@ -72,6 +72,13 @@ python -m eaa_pose.run_tracks --config configs/tsu.yaml --device cuda --all
 python -m eaa_pose.run_tracks --config configs/pku_v1.yaml --device cuda \
     --limit 20 --tracking-model yolo26n.pt --tracking-tracker bytetrack.yaml
 
+# Split work across two Colab accounts on the same output folder.
+# Ranges use the full video list sorted by video_id: start inclusive, end exclusive.
+python -m eaa_pose.run_tracks --config configs/pku_v1.yaml --device cuda \
+    --start-index 0 --end-index 1000 --all
+python -m eaa_pose.run_tracks --config configs/pku_v1.yaml --device cuda \
+    --start-index 1000 --end-index 2000 --all
+
 # Local smoke test
 python -m eaa_pose.run_tracks --config configs/pku_v1.yaml \
     --device cpu --dry-run --limit 2 --max-frames 150 \
@@ -82,7 +89,10 @@ python -m eaa_pose.run_tracks --config configs/pku_v1.yaml \
 `<out_dir>/tracks/<video_id>_tracks.json` already exists, that video is
 skipped.  After each newly processed video, its track JSON is written
 immediately.  `track_stats.json` is rebuilt from both existing and newly
-generated track files.
+generated track files.  `--start-index` and `--end-index` are applied first on
+the full video list sorted by `video_id` (`start` inclusive, `end` exclusive).
+After that range is selected, existing track files in the range are skipped.
+`--limit N` then processes at most N remaining pending videos in that range.
 
 ### Module 2B — Run pose estimation
 

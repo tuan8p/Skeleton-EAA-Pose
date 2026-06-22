@@ -56,6 +56,8 @@ _CLI_TO_CONFIG: dict[str, str] = {
     "max_videos":      "max_videos",
     "max_frames":      "max_frames",
     "limit":           "limit",
+    "start_index":     "start_index",
+    "end_index":       "end_index",
     "all_videos":      "all",
     "dry_run":         "dry_run",
 }

@@ -135,14 +135,17 @@ class TrackPipeline:
         tracks_dir = str(self._cfg.get("tracking.tracks_dir", "tracks"))
         stats_filename = str(self._cfg.get("tracking.stats_filename", "track_stats.json"))
 
-        existing_timelines = self._load_existing_timelines(entries, out_dir, tracks_dir)
+        ranged_entries = self._select_index_range(entries)
+        existing_timelines = self._load_existing_timelines(ranged_entries, out_dir, tracks_dir)
         pending_entries = [
-            entry for entry in entries if entry.video_id not in existing_timelines
+            entry for entry in ranged_entries if entry.video_id not in existing_timelines
         ]
         selected_entries = self._select_entries(pending_entries)
+        start_index, end_index = self._resolved_index_range(len(entries))
 
         print(
-            f"[tracks] total={len(entries)} existing={len(existing_timelines)} "
+            f"[tracks] total={len(entries)} range=[{start_index}:{end_index}] "
+            f"in_range={len(ranged_entries)} existing={len(existing_timelines)} "
             f"pending={len(pending_entries)} selected={len(selected_entries)}"
         )
 
@@ -253,6 +256,26 @@ class TrackPipeline:
             except Exception as exc:  # noqa: BLE001
                 warnings.warn(f"Could not read existing track file '{path}': {exc}", stacklevel=2)
         return timelines
+
+    def _select_index_range(self, entries: list[VideoEntry]) -> list[VideoEntry]:
+        """Sort all matched videos by video_id, then apply [start:end)."""
+        sorted_entries = sorted(entries, key=lambda entry: entry.video_id)
+        start_index, end_index = self._resolved_index_range(len(sorted_entries))
+        return sorted_entries[start_index:end_index]
+
+    def _resolved_index_range(self, total_entries: int) -> tuple[int, int]:
+        raw_start = self._cfg.get("start_index", None)
+        raw_end = self._cfg.get("end_index", None)
+
+        start_index = 0 if raw_start is None else int(raw_start)
+        end_index = total_entries if raw_end is None else int(raw_end)
+
+        if start_index < 0:
+            raise ValueError("--start-index must be >= 0")
+        if raw_end is not None and end_index < start_index:
+            raise ValueError("--end-index must be >= --start-index")
+
+        return min(start_index, total_entries), min(end_index, total_entries)
 
     def _select_entries(self, pending_entries: list[VideoEntry]) -> list[VideoEntry]:
         """Select pending videos according to --all / --limit / smoke flags."""
@@ -389,6 +412,26 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Process at most N pending videos that do not already have track JSON.",
+    )
+    p.add_argument(
+        "--start-index",
+        dest="start_index",
+        type=int,
+        default=None,
+        help=(
+            "Zero-based inclusive start index in the full video list sorted by "
+            "video_id. Applied before existing track JSON files are skipped."
+        ),
+    )
+    p.add_argument(
+        "--end-index",
+        dest="end_index",
+        type=int,
+        default=None,
+        help=(
+            "Zero-based exclusive end index in the full video list sorted by "
+            "video_id. Applied before existing track JSON files are skipped."
+        ),
     )
     p.add_argument(
         "--all",
