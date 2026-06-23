@@ -123,6 +123,10 @@ rclone version
 Configure an `rclone` remote named `gdrive` before running the pipeline.  The
 simplest repeatable approach is to store a working `rclone.conf` as a Kaggle
 secret or uploaded file, then copy it to `~/.config/rclone/rclone.conf`.
+Kaggle notebook cells do not reliably accept interactive `rclone config` input,
+so create `rclone.conf` once in Colab or a local terminal, then provide it to
+Kaggle as either a private Dataset containing `rclone.conf` or a Secret named
+`RCLONE_CONF`.
 
 Example Step 2A run:
 
