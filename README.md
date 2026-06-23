@@ -174,6 +174,12 @@ python -m eaa_pose.run_track_qc_interpolate --config configs/pku_v1.yaml \
     --max-gap 10
 ```
 
+`run_track_qc_interpolate` searches for nearby bbox anchors on both sides of a
+short in-action `no_detection` run.  The anchor frames do not need to be
+immediately adjacent, so a neighboring `outside_action` frame without a bbox no
+longer blocks interpolation.  Use `--max-anchor-distance N` to control how far
+left/right it may scan; omitted means `max_gap + 2`.
+
 Interpolated frames keep the original status for review:
 
 ```json

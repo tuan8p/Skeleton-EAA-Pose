@@ -4,8 +4,8 @@ eaa_pose.run_track_qc_interpolate
 Module 2A_QC_2 - interpolate short no_detection bbox gaps.
 
 This step reads existing per-video track JSON files, interpolates short
-``no_detection`` gaps inside action segments when both neighboring frames have
-valid bboxes, overwrites the same track JSON files, and writes
+``no_detection`` gaps inside action segments when nearby frames have valid
+bboxes, overwrites the same track JSON files, and writes
 ``track_stats_qc.json`` with the same structure as ``track_stats.json``.
 """
 
@@ -42,6 +42,9 @@ class TrackQCInterpolatePipeline:
             self._cfg.get("track_qc.stats_filename", "track_stats_qc.json")
         )
         max_gap = int(self._cfg.get("track_qc.max_interp_gap", 0) or 0)
+        max_anchor_distance = int(
+            self._cfg.get("track_qc.max_interp_anchor_distance", max_gap + 2) or 0
+        )
         limit = self._cfg.get("limit", None)
 
         track_files = sorted((out_dir / tracks_dir).glob("*_tracks.json"))
@@ -50,7 +53,7 @@ class TrackQCInterpolatePipeline:
 
         print(
             f"[track-qc-interpolate] files={len(track_files)} "
-            f"max_gap={max_gap}"
+            f"max_gap={max_gap} max_anchor_distance={max_anchor_distance}"
         )
 
         timelines: list[dict[str, Any]] = []
@@ -70,7 +73,11 @@ class TrackQCInterpolatePipeline:
                 warnings.warn(f"Could not read track file '{path}': {exc}", stacklevel=2)
                 continue
 
-            changed, n_frames = self._interpolate_timeline(timeline, max_gap)
+            changed, n_frames = self._interpolate_timeline(
+                timeline,
+                max_gap,
+                max_anchor_distance,
+            )
             if changed:
                 write_json(path, timeline)
                 changed_videos += 1
@@ -88,6 +95,7 @@ class TrackQCInterpolatePipeline:
         self,
         timeline: dict[str, Any],
         max_gap: int,
+        max_anchor_distance: int,
     ) -> tuple[bool, int]:
         if max_gap <= 0:
             return False, 0
@@ -115,15 +123,28 @@ class TrackQCInterpolatePipeline:
             if start == 0 or end + 1 >= len(frames):
                 continue
 
-            left = frames[start - 1]
-            right = frames[end + 1]
-            left_bbox = self._bbox_array(left)
-            right_bbox = self._bbox_array(right)
-            if left_bbox is None or right_bbox is None:
+            left_anchor = self._find_bbox_anchor(
+                frames,
+                start_idx=start - 1,
+                step=-1,
+                max_distance=max_anchor_distance,
+            )
+            right_anchor = self._find_bbox_anchor(
+                frames,
+                start_idx=end + 1,
+                step=1,
+                max_distance=max_anchor_distance,
+            )
+            if left_anchor is None or right_anchor is None:
+                continue
+            left_idx, left_bbox = left_anchor
+            right_idx, right_bbox = right_anchor
+            denom = right_idx - left_idx
+            if denom <= 0:
                 continue
 
-            for offset, frame_idx in enumerate(range(start, end + 1), start=1):
-                alpha = offset / (gap_len + 1)
+            for frame_idx in range(start, end + 1):
+                alpha = (frame_idx - left_idx) / denom
                 bbox = ((1.0 - alpha) * left_bbox + alpha * right_bbox).tolist()
                 frame = frames[frame_idx]
                 frame.setdefault("original_status", frame.get("status", STATUS_NO_DETECTION))
@@ -136,6 +157,34 @@ class TrackQCInterpolatePipeline:
                 interpolated += 1
 
         return changed, interpolated
+
+    @classmethod
+    def _find_bbox_anchor(
+        cls,
+        frames: list[Any],
+        start_idx: int,
+        step: int,
+        max_distance: int,
+    ) -> tuple[int, np.ndarray] | None:
+        """Find the nearest frame with a valid bbox.
+
+        The immediate neighbor can be an outside-action frame without a
+        detection.  In that case we skip over nearby frames until a usable bbox
+        is found, bounded by ``max_distance`` to avoid bridging long unknown
+        regions.
+        """
+        if step == 0 or max_distance <= 0:
+            return None
+
+        idx = start_idx
+        checked = 0
+        while 0 <= idx < len(frames) and checked < max_distance:
+            bbox = cls._bbox_array(frames[idx])
+            if bbox is not None:
+                return idx, bbox
+            idx += step
+            checked += 1
+        return None
 
     @staticmethod
     def _is_interpolatable_gap_frame(frame: Any) -> bool:
@@ -174,6 +223,16 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         required=True,
         help="Maximum contiguous no_detection gap length to interpolate.",
+    )
+    p.add_argument(
+        "--max-anchor-distance",
+        dest="track_qc_max_interp_anchor_distance",
+        type=int,
+        default=None,
+        help=(
+            "Maximum number of frames to scan left/right for bbox anchors. "
+            "Defaults to max_gap + 2."
+        ),
     )
     p.add_argument(
         "--limit",

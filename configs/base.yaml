@@ -41,6 +41,9 @@ tracking:
 
 track_qc:
   stats_filename: track_stats_qc.json
+  # Nearby bbox anchor search for 2A_QC_2. If null/omitted, code uses
+  # max_interp_gap + 2 so short outside-action no-bbox neighbors can be skipped.
+  max_interp_anchor_distance:
 
 # ------------------------------------------------------------------
 # Pose estimator (RTMW3D whole-body, 133 keypoints)

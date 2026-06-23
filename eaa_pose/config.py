@@ -61,6 +61,7 @@ _CLI_TO_CONFIG: dict[str, str] = {
     "all_videos":      "all",
     "dry_run":         "dry_run",
     "track_qc_max_interp_gap": "track_qc.max_interp_gap",
+    "track_qc_max_interp_anchor_distance": "track_qc.max_interp_anchor_distance",
 }
 
 
