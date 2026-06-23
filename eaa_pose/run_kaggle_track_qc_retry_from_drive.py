@@ -231,6 +231,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--video-ext", default=None)
     p.add_argument("--tracking-model", default=None)
     p.add_argument("--tracking-tracker", default=None)
+    p.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        help="Accepted for CLI parity. QC retry already processes all no_detection targets unless --limit is set.",
+    )
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--max-frames", type=int, default=None)
     p.add_argument("--dry-run", action="store_true", default=False)

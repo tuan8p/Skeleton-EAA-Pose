@@ -393,6 +393,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--video-ext", default=None)
     p.add_argument("--start-index", type=int, default=None)
     p.add_argument("--end-index", type=int, default=None)
+    p.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        help="Accepted for CLI parity. The wrapper already processes all pending pose videos unless --limit is set.",
+    )
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--num-persons", type=int, default=None)
     p.add_argument("--max-frames", type=int, default=None)

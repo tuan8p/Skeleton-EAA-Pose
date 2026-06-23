@@ -423,6 +423,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tracking-tracker", default=None)
     p.add_argument("--start-index", type=int, default=None)
     p.add_argument("--end-index", type=int, default=None)
+    p.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        help=(
+            "Accepted for parity with run_tracks. The Kaggle wrapper already "
+            "processes all pending videos in the selected range unless --limit is set."
+        ),
+    )
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--max-frames", type=int, default=None)
     p.add_argument("--dry-run", action="store_true", default=False)
