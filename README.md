@@ -27,8 +27,10 @@ pip install -r requirements.txt
 
 ### GPU/MMPose stack (Module 2 — Colab GPU)
 
-Run the Colab notebook `notebooks/colab_pipeline.ipynb`, which mounts Google Drive
-and installs the full stack automatically.  For a manual install:
+Run `colab_pipeline.ipynb` for Colab, or `kaggle_pipeline.ipynb` for the
+Drive-backed Kaggle pipeline.  The Kaggle notebook stages RGB videos in bounded
+batches under `/kaggle/working`, syncs outputs back to Drive after each batch,
+and covers Step 2A, Step 2A_QC, and Step 2B.  For a manual install:
 
 ```bash
 # 1. PyTorch with CUDA (match your CUDA version)
@@ -94,6 +96,66 @@ generated track files.  `--start-index` and `--end-index` are applied first on
 the full video list sorted by `video_id` (`start` inclusive, `end` exclusive).
 After that range is selected, existing track files in the range are skipped.
 `--limit N` then processes at most N remaining pending videos in that range.
+
+### Kaggle — Drive-backed full pipeline runners
+
+Kaggle does not mount Google Drive like Colab.  Use `rclone` to treat Drive as
+the durable storage and Kaggle as a temporary GPU worker:
+
+- existing `tracks/*.json` are synced from Drive before planning;
+- Step 2A skips videos that already have `<video_id>_tracks.json`;
+- Step 2A_QC_1 retries only videos listed under `no_detection`;
+- Step 2A_QC_2 interpolates track JSON files without staging RGB videos;
+- Step 2B skips videos whose expected `.npy` samples already exist on Drive;
+- only the current batch of RGB videos is copied to `/kaggle/working`;
+- two `run_tracks` workers run in parallel on `CUDA_VISIBLE_DEVICES=0` and `1`;
+- generated tracks, samples, stats, and QC reports are synced back to Drive;
+- staged videos are deleted before the next batch.
+
+Recommended Kaggle setup for 2x T4 with about 19 GB working/output storage:
+
+```bash
+# Install rclone once per Kaggle session.
+curl https://rclone.org/install.sh | sudo bash
+rclone version
+```
+
+Configure an `rclone` remote named `gdrive` before running the pipeline.  The
+simplest repeatable approach is to store a working `rclone.conf` as a Kaggle
+secret or uploaded file, then copy it to `~/.config/rclone/rclone.conf`.
+
+Example Step 2A run:
+
+```bash
+python -m eaa_pose.run_kaggle_tracks_from_drive \
+    --config configs/pku_v1.yaml \
+    --remote-name gdrive \
+    --remote-video-dir "DACN-TN_datasets/DATN/rawdatasets/videos/PKUv1" \
+    --remote-segments-dir "DACN-TN_datasets/DATN/rawdatasets/PKU_MMD_v1/Label_daily" \
+    --remote-actions-path "DACN-TN_datasets/DATN/rawdatasets/Actions_daily.csv" \
+    --remote-out-dir "DACN-TN_datasets/DATN/outputs/pku_v1" \
+    --workers 2 \
+    --devices 0,1 \
+    --batch-size 8 \
+    --max-batch-gb 15 \
+    --tracking-model yolo26m.pt \
+    --tracking-tracker bytetrack.yaml
+```
+
+Use `/kaggle/working/eaa_pose_kaggle/staged_videos` for staged videos and keep
+`--max-batch-gb 15` so each copied video wave stays below about 15 GB.  The
+runner deletes staged videos after each batch; the remaining working/output
+space is for `tracks/*.json`, `track_stats.json`, and worker logs under
+`/kaggle/working/eaa_pose_kaggle`.
+
+The full Kaggle notebook calls these wrappers:
+
+```bash
+python -m eaa_pose.run_kaggle_tracks_from_drive ...
+python -m eaa_pose.run_kaggle_track_qc_retry_from_drive ...
+python -m eaa_pose.run_track_qc_interpolate ...
+python -m eaa_pose.run_kaggle_pose_from_drive ...
+```
 
 ### Module 2A_QC — Retry and interpolate track timelines
 
