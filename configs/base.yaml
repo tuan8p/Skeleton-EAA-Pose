@@ -44,6 +44,9 @@ track_qc:
   # Nearby bbox anchor search for 2A_QC_2. If null/omitted, code uses
   # max_interp_gap + 2 so short outside-action no-bbox neighbors can be skipped.
   max_interp_anchor_distance:
+  # Default allows a short in-action no_detection gap at an action boundary to
+  # be filled from one nearby bbox anchor when the opposite side has no bbox.
+  no_one_sided: false
 
 # ------------------------------------------------------------------
 # Pose estimator (RTMW3D whole-body, 133 keypoints)

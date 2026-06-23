@@ -62,6 +62,7 @@ _CLI_TO_CONFIG: dict[str, str] = {
     "dry_run":         "dry_run",
     "track_qc_max_interp_gap": "track_qc.max_interp_gap",
     "track_qc_max_interp_anchor_distance": "track_qc.max_interp_anchor_distance",
+    "track_qc_no_one_sided": "track_qc.no_one_sided",
 }
 
 

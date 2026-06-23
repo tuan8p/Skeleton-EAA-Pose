@@ -5,7 +5,9 @@ Module 2A_QC_2 - interpolate short no_detection bbox gaps.
 
 This step reads existing per-video track JSON files, interpolates short
 ``no_detection`` gaps inside action segments when nearby frames have valid
-bboxes, overwrites the same track JSON files, and writes
+bboxes.  At action boundaries, a one-sided bbox anchor can be used when the
+opposite side has no usable detection.  The step overwrites the same track JSON
+files and writes
 ``track_stats_qc.json`` with the same structure as ``track_stats.json``.
 """
 
@@ -45,6 +47,7 @@ class TrackQCInterpolatePipeline:
         max_anchor_distance = int(
             self._cfg.get("track_qc.max_interp_anchor_distance", max_gap + 2) or 0
         )
+        allow_one_sided = not bool(self._cfg.get("track_qc.no_one_sided", False))
         limit = self._cfg.get("limit", None)
 
         track_files = sorted((out_dir / tracks_dir).glob("*_tracks.json"))
@@ -53,7 +56,8 @@ class TrackQCInterpolatePipeline:
 
         print(
             f"[track-qc-interpolate] files={len(track_files)} "
-            f"max_gap={max_gap} max_anchor_distance={max_anchor_distance}"
+            f"max_gap={max_gap} max_anchor_distance={max_anchor_distance} "
+            f"allow_one_sided={allow_one_sided}"
         )
 
         timelines: list[dict[str, Any]] = []
@@ -77,6 +81,7 @@ class TrackQCInterpolatePipeline:
                 timeline,
                 max_gap,
                 max_anchor_distance,
+                allow_one_sided,
             )
             if changed:
                 write_json(path, timeline)
@@ -96,6 +101,7 @@ class TrackQCInterpolatePipeline:
         timeline: dict[str, Any],
         max_gap: int,
         max_anchor_distance: int,
+        allow_one_sided: bool,
     ) -> tuple[bool, int]:
         if max_gap <= 0:
             return False, 0
@@ -135,21 +141,23 @@ class TrackQCInterpolatePipeline:
                 step=1,
                 max_distance=max_anchor_distance,
             )
-            if left_anchor is None or right_anchor is None:
+            if left_anchor is None and right_anchor is None:
                 continue
-            left_idx, left_bbox = left_anchor
-            right_idx, right_bbox = right_anchor
-            denom = right_idx - left_idx
-            if denom <= 0:
+            if (left_anchor is None or right_anchor is None) and not allow_one_sided:
                 continue
 
             for frame_idx in range(start, end + 1):
-                alpha = (frame_idx - left_idx) / denom
-                bbox = ((1.0 - alpha) * left_bbox + alpha * right_bbox).tolist()
+                bbox = self._interpolated_bbox(
+                    frame_idx=frame_idx,
+                    left_anchor=left_anchor,
+                    right_anchor=right_anchor,
+                )
+                if bbox is None:
+                    continue
                 frame = frames[frame_idx]
                 frame.setdefault("original_status", frame.get("status", STATUS_NO_DETECTION))
                 frame["status"] = STATUS_INTERPOLATED_NO_DETECTION
-                frame["bbox"] = [float(v) for v in bbox]
+                frame["bbox"] = [float(v) for v in bbox.tolist()]
                 frame["score"] = None
                 frame["track_id"] = None
                 frame["num_candidates"] = 0
@@ -157,6 +165,29 @@ class TrackQCInterpolatePipeline:
                 interpolated += 1
 
         return changed, interpolated
+
+    @staticmethod
+    def _interpolated_bbox(
+        *,
+        frame_idx: int,
+        left_anchor: tuple[int, np.ndarray] | None,
+        right_anchor: tuple[int, np.ndarray] | None,
+    ) -> np.ndarray | None:
+        """Return interpolated bbox, or copy the only available anchor."""
+        if left_anchor is not None and right_anchor is not None:
+            left_idx, left_bbox = left_anchor
+            right_idx, right_bbox = right_anchor
+            denom = right_idx - left_idx
+            if denom <= 0:
+                return None
+            alpha = (frame_idx - left_idx) / denom
+            return (1.0 - alpha) * left_bbox + alpha * right_bbox
+
+        if left_anchor is not None:
+            return left_anchor[1].copy()
+        if right_anchor is not None:
+            return right_anchor[1].copy()
+        return None
 
     @classmethod
     def _find_bbox_anchor(
@@ -232,6 +263,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Maximum number of frames to scan left/right for bbox anchors. "
             "Defaults to max_gap + 2."
+        ),
+    )
+    p.add_argument(
+        "--no-one-sided",
+        dest="track_qc_no_one_sided",
+        action="store_true",
+        default=None,
+        help=(
+            "Require bbox anchors on both sides. By default, a short "
+            "in-action no_detection gap may be filled from one nearby bbox "
+            "anchor at action boundaries."
         ),
     )
     p.add_argument(
