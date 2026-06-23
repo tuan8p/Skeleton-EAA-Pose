@@ -104,7 +104,8 @@ the durable storage and Kaggle as a temporary GPU worker:
 
 - existing `tracks/*.json` are synced from Drive before planning;
 - Step 2A skips videos that already have `<video_id>_tracks.json`;
-- Step 2A_QC_1 retries only videos listed under `no_detection`;
+- Step 2A_QC_1 retries only videos whose current track JSON still contains
+  in-action `no_detection`;
 - Step 2A_QC_2 interpolates track JSON files without staging RGB videos;
 - Step 2B skips videos whose expected `.npy` samples already exist on Drive;
 - only the current batch of RGB videos is copied to `/kaggle/working`;
@@ -164,7 +165,7 @@ python -m eaa_pose.run_kaggle_pose_from_drive ...
 ### Module 2A_QC — Retry and interpolate track timelines
 
 ```bash
-# 2A_QC_1: retry videos with no_detection inside action frames.
+# 2A_QC_1: scan tracks and retry videos with no_detection inside action frames.
 # This overwrites tracks/<video_id>_tracks.json and rebuilds track_stats.json.
 python -m eaa_pose.run_track_qc_retry --config configs/pku_v1.yaml --device cuda
 
@@ -173,6 +174,11 @@ python -m eaa_pose.run_track_qc_retry --config configs/pku_v1.yaml --device cuda
 python -m eaa_pose.run_track_qc_interpolate --config configs/pku_v1.yaml \
     --max-gap 10
 ```
+
+`run_track_qc_retry` selects retry targets by reading the current
+`tracks/*_tracks.json` files, not by trusting `track_stats.json` or
+`track_stats_qc.json`.  After retrying, it rebuilds `track_stats.json` from the
+available track files.
 
 `run_track_qc_interpolate` searches for nearby bbox anchors around a short
 in-action `no_detection` run.  The anchor frames do not need to be immediately

@@ -3,10 +3,10 @@ eaa_pose.run_track_qc_retry
 ===========================
 Module 2A_QC_1 - retry YOLO tracking for videos with no_detection frames.
 
-This step reads ``track_stats.json``, finds videos listed under
-``videos_by_status.no_detection``, reruns the same Step 2A tracking logic for
-those videos, overwrites their original track JSON files, and rebuilds
-``track_stats.json`` from the available track files.
+This step scans the existing ``tracks/*_tracks.json`` files, finds videos that
+currently have ``no_detection`` frames inside action segments, reruns the same
+Step 2A tracking logic for those videos, overwrites their original track JSON
+files, and rebuilds ``track_stats.json`` from the available track files.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from .track_io import (
     STATUS_NO_DETECTION,
     read_json,
     summarize_track_timelines,
+    status_segments_and_count,
     track_path,
     write_json,
 )
@@ -42,12 +43,9 @@ class TrackQCRetryPipeline:
         stats_filename = str(self._cfg.get("tracking.stats_filename", "track_stats.json"))
         stats_path = out_dir / stats_filename
 
-        if not stats_path.exists():
-            raise FileNotFoundError(f"Track stats not found: {stats_path}")
-
         dataset = self._track_pipeline._load_dataset()
         entries = {entry.video_id: entry for entry in dataset.load()}
-        target_ids = self._target_video_ids(read_json(stats_path))
+        target_ids = self._target_video_ids_from_track_files(out_dir, tracks_dir)
 
         limit = self._cfg.get("limit", None)
         if limit is not None:
@@ -91,27 +89,33 @@ class TrackQCRetryPipeline:
         print(f"\nDone. Retried and overwrote {n_saved} track timeline(s).")
         print(f"Track stats -> {stats_path}")
 
-    @staticmethod
-    def _target_video_ids(stats: dict[str, Any]) -> list[str]:
-        videos_by_status = stats.get("videos_by_status", {})
-        if not isinstance(videos_by_status, dict):
-            return []
-
-        items = videos_by_status.get(STATUS_NO_DETECTION, [])
-        if not isinstance(items, list):
-            return []
-
+    @classmethod
+    def _target_video_ids_from_track_files(cls, out_dir: Path, tracks_dir: str) -> list[str]:
         ids: list[str] = []
         seen: set[str] = set()
-        for item in items:
-            if not isinstance(item, dict):
+        track_files = sorted((out_dir / tracks_dir).glob("*_tracks.json"))
+        for path in track_files:
+            try:
+                timeline = read_json(path)
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(f"Could not read track file '{path}': {exc}", stacklevel=2)
                 continue
-            video_id = str(item.get("video_id", ""))
+            if not cls._has_no_detection_in_action(timeline):
+                continue
+            video_id = str(timeline.get("video_id") or path.name.removesuffix("_tracks.json"))
             if not video_id or video_id in seen:
                 continue
             seen.add(video_id)
             ids.append(video_id)
         return ids
+
+    @staticmethod
+    def _has_no_detection_in_action(timeline: dict[str, Any]) -> bool:
+        frames = timeline.get("frames", [])
+        if not isinstance(frames, list):
+            return False
+        _, frame_count = status_segments_and_count(frames, STATUS_NO_DETECTION)
+        return frame_count > 0
 
     @staticmethod
     def _rebuild_stats(

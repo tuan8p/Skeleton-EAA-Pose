@@ -1,12 +1,12 @@
 """
 Drive-backed Kaggle runner for Step 2A_QC_1.
 
-This script retries videos listed under ``videos_by_status.no_detection`` in
-``track_stats.json`` without requiring the full RGB dataset to be present on
-Kaggle.  It stages only the target videos in bounded batches, runs two retry
-workers on the available GPUs, merges generated track JSON files, rebuilds
-``track_stats.json`` from the local track cache, and syncs tracks/stats back to
-Drive after each batch.
+This script retries videos whose synced ``tracks/*_tracks.json`` files
+currently contain ``no_detection`` frames inside action segments.  It does not
+trust ``track_stats.json`` for target selection.  It stages only the target
+videos in bounded batches, runs retry workers on the available GPUs, merges
+generated track JSON files, rebuilds ``track_stats.json`` from the local track
+cache, and syncs tracks/stats back to Drive after each batch.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -27,23 +26,12 @@ from .run_kaggle_tracks_from_drive import (
     _list_remote_videos,
     _make_batches,
     _merge_worker_tracks,
-    _rclone,
-    _rclone_path,
     _split_for_workers,
     _stage_worker_videos,
     _sync_inputs,
     _write_and_sync_stats,
 )
 from .run_track_qc_retry import TrackQCRetryPipeline
-from .track_io import read_json
-
-
-def _try_copyto(remote_path: str, local_path: Path) -> bool:
-    try:
-        _rclone(["copyto", remote_path, str(local_path)])
-    except subprocess.CalledProcessError:
-        return False
-    return True
 
 
 def _target_videos(
@@ -52,15 +40,11 @@ def _target_videos(
     local_out: Path,
     remote_videos: dict[str, RemoteVideo],
 ) -> list[RemoteVideo]:
-    stats_filename = str(cfg.get("tracking.stats_filename", "track_stats.json"))
-    stats_path = local_out / stats_filename
-    if not stats_path.exists():
-        remote_out = _rclone_path(args.remote_name, args.remote_out_dir)
-        _try_copyto(f"{remote_out.rstrip('/')}/{stats_filename}", stats_path)
-    if not stats_path.exists():
-        raise FileNotFoundError(f"Track stats not found locally or on Drive: {stats_path}")
-
-    target_ids = TrackQCRetryPipeline._target_video_ids(read_json(stats_path))
+    tracks_dir = str(cfg.get("tracking.tracks_dir", "tracks"))
+    target_ids = TrackQCRetryPipeline._target_video_ids_from_track_files(
+        local_out,
+        tracks_dir,
+    )
     if args.limit is not None:
         target_ids = target_ids[: max(0, int(args.limit))]
 
@@ -126,7 +110,12 @@ def _worker_command(
     return cmd
 
 
-def _copy_retry_context(local_out: Path, worker_out: Path, cfg: PipelineConfig) -> None:
+def _copy_retry_context(
+    local_out: Path,
+    worker_out: Path,
+    cfg: PipelineConfig,
+    video_ids: list[str],
+) -> None:
     tracks_dir = str(cfg.get("tracking.tracks_dir", "tracks"))
     stats_filename = str(cfg.get("tracking.stats_filename", "track_stats.json"))
     worker_out.mkdir(parents=True, exist_ok=True)
@@ -134,6 +123,10 @@ def _copy_retry_context(local_out: Path, worker_out: Path, cfg: PipelineConfig) 
     stats_path = local_out / stats_filename
     if stats_path.exists():
         shutil.copy2(stats_path, worker_out / stats_filename)
+    for video_id in video_ids:
+        src = local_out / tracks_dir / f"{video_id}_tracks.json"
+        if src.exists():
+            shutil.copy2(src, worker_out / tracks_dir / src.name)
 
 
 def _process_batch(
@@ -164,7 +157,7 @@ def _process_batch(
         worker_out = Path(args.work_dir) / "worker_outputs" / f"qc_retry_batch_{batch_index:04d}_worker_{worker_idx}"
         if worker_out.exists():
             shutil.rmtree(worker_out)
-        _copy_retry_context(local_out, worker_out, cfg)
+        _copy_retry_context(local_out, worker_out, cfg, [video.video_id for video in videos])
         video_dir = _stage_worker_videos(worker_stage, videos)
         cmd = _worker_command(
             args,
