@@ -223,3 +223,7 @@ data/
 out/
 *.npy
 .ipynb_checkpoints/
+models/
+*.pt
+config.local.yaml
+yolo26n.pt
