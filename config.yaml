@@ -17,7 +17,7 @@ yolo:
   conf_threshold: 0.2
   iou_threshold: 0.7
   max_detections: 2
-  tracker: "deepocsort"       # deepocsort (boxmot) | iou (fallback thu cong)
+  tracker: "iou"       # deepocsort (boxmot) | iou (fallback thu cong)
 
 depth:
   enabled: false             # bat khi co file depth cho video
@@ -102,6 +102,7 @@ paths:
   depth_dir: ""              # PKU: <video>-depth.avi ; TSU: <video>-depth.mp4
 
 runtime:
+  num_workers: 1             # Thiet lap > 1 de chay song song nhieu video (luu y VRAM)
   max_segments_per_video: null   # null = full; dat so nho de test nhanh tren CPU
   max_chunks_per_video: null     # null = full; gioi han so chunk xu ly tren moi video
   log_level: "INFO"

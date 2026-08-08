@@ -12,6 +12,7 @@ mediapipe:
 yolo:
   model_name: "yolo26x.pt"
   batch_size: 16
+  tracker: "iou"
   conf_threshold: 0.2
   iou_threshold: 0.7
   max_detections: 2
