@@ -161,11 +161,14 @@ class DetectionPipeline:
                 stats = self.process_video(video_name, logger)
                 logger.write_video_log(stats, self.cfg.as_dict())
                 logger.append_batch_summary(stats)
-                logger.info(
-                    f"Xong {video_name}: ok={stats.ok_frames}/{stats.total_frames}, "
-                    f"fail={len(stats.fail_frames)}, video_ok={stats.video_ok}")
+                msg = (f"Xong {video_name}: ok={stats.ok_frames}/{stats.total_frames}, "
+                       f"fail={len(stats.fail_frames)}, video_ok={stats.video_ok}")
+                logger.info(msg)
+                tqdm.write(msg)
             except Exception as exc:
-                logger.warning(f"Lỗi video {video_name}: {exc}")
+                msg_err = f"Lỗi video {video_name}: {exc}"
+                logger.warning(msg_err)
+                tqdm.write(msg_err)
                 import traceback
                 logger.warning(traceback.format_exc())
 
