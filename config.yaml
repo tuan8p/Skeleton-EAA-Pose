@@ -13,6 +13,7 @@ mediapipe:
 
 yolo:
   model_name: "yolo26l.pt"    # Ultralytics YOLO26 nano (CPU-friendly)
+  batch_size: 16
   conf_threshold: 0.2
   iou_threshold: 0.7
   max_detections: 2

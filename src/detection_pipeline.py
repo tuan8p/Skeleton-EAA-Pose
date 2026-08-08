@@ -150,10 +150,13 @@ class DetectionPipeline:
     # ──────────── public API ────────────
 
     def run_batch(self, start: int = 0, end: int | None = None) -> None:
+        from tqdm import tqdm
         videos = self.annotator.list_videos()
         end = len(videos) if end is None else min(end, len(videos))
         logger = DetectionLogger(self.cfg, self.dataset, start, end)
-        for video_name in videos[start:end]:
+        
+        video_iterable = tqdm(videos[start:end], desc="Videos", position=0)
+        for video_name in video_iterable:
             try:
                 stats = self.process_video(video_name, logger)
                 logger.write_video_log(stats, self.cfg.as_dict())
@@ -203,7 +206,10 @@ class DetectionPipeline:
         if self.max_chunks is not None:
             chunks = chunks[: int(self.max_chunks)]
 
-        for chunk_idx, chunk_segs in enumerate(chunks):
+        from tqdm import tqdm
+        chunk_iterable = tqdm(enumerate(chunks), total=len(chunks), desc=f"Chunks ({video_name})", position=1, leave=False)
+
+        for chunk_idx, chunk_segs in chunk_iterable:
             # ── Resume check ──
             # Quét folder chunks: nếu file temp jsonl của chunk đã tồn tại thì coi như done
             if self.saver.chunk_exists(video_name, chunk_idx):
@@ -283,55 +289,79 @@ class DetectionPipeline:
         chunk_ok = True
 
         cap = cv2.VideoCapture(video_path)
+        batch_size = int(self.cfg.get("yolo.batch_size", 16))
+        
         try:
             for (start, end, action_ids) in intervals:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, start - 1)
-                for fid in range(start, end + 1):
-                    read_ok, frame = cap.read()
-                    if not read_ok:
-                        # Không đọc được frame → fail cứng
-                        self._count_frame(
-                            fid, False, [], counted_frames, stats)
-                        row = _make_row(fid, fps, action_ids, chunk_idx,
-                                        [], False, "no_detect")
-                        rows.append(row)
-                        chunk_ok = False
+                curr_fid = start
+                
+                while curr_fid <= end:
+                    batch_fids = []
+                    batch_frames = []
+                    batch_from_cache = []
+                    
+                    while len(batch_fids) < batch_size and curr_fid <= end:
+                        read_ok, frame = cap.read()
+                        if not read_ok:
+                            # Không đọc được frame → fail cứng
+                            self._count_frame(curr_fid, False, [], counted_frames, stats)
+                            row = _make_row(curr_fid, fps, action_ids, chunk_idx,
+                                            [], False, "no_detect")
+                            rows.append(row)
+                            chunk_ok = False
+                            curr_fid += 1
+                            continue
+                            
+                        batch_fids.append(curr_fid)
+                        batch_frames.append(frame)
+                        batch_from_cache.append(curr_fid in frame_cache)
+                        curr_fid += 1
+                        
+                    if not batch_fids:
                         continue
+                        
+                    # 1. Chạy YOLO batch cho các frame chưa được cache
+                    detect_frames = [frame for frame, is_cached in zip(batch_frames, batch_from_cache) if not is_cached]
+                    batch_boxes = []
+                    if detect_frames:
+                        batch_boxes = self.yolo.detect_batch(detect_frames, batch_size=batch_size)
+                        
+                    # 2. Xử lý tuần tự (Tracker, Retry, Stats)
+                    b_idx = 0
+                    for fid, frame, is_cached in zip(batch_fids, batch_frames, batch_from_cache):
+                        if is_cached:
+                            boxes = frame_cache[fid]
+                        else:
+                            initial_boxes = batch_boxes[b_idx]
+                            b_idx += 1
+                            # Pass initial_boxes cho attempt 0, hàm sẽ tự retry nếu fail
+                            boxes = self._detect_with_retry(
+                                frame, initial_boxes, tracker, n_expected, stats)
+                            frame_cache[fid] = boxes
 
-                    from_cache = fid in frame_cache
-                    if from_cache:
-                        boxes = frame_cache[fid]
-                    else:
-                        boxes = self._detect_with_retry(
-                            frame, tracker, n_expected, stats)
-                        frame_cache[fid] = boxes
+                        valid = [b for b in boxes if b.confidence >= self.conf_threshold]
+                        frame_ok = (len(valid) == n_expected)
 
-                    valid = [b for b in boxes
-                             if b.confidence >= self.conf_threshold]
-                    frame_ok = (len(valid) == n_expected)
+                        if not is_cached:
+                            self._count_frame(fid, frame_ok, valid, counted_frames, stats)
 
-                    if not from_cache:
-                        # Count stats chỉ lần đầu detect (không re-count cache hit)
-                        self._count_frame(
-                            fid, frame_ok, valid, counted_frames, stats)
+                        if not frame_ok:
+                            chunk_ok = False
 
-                    if not frame_ok:
-                        chunk_ok = False
+                        bbox_out = [[*b.xyxy, round(b.confidence, 4)] for b in boxes] if boxes else []
+                        if frame_ok:
+                            fail_reason = None
+                        elif len(boxes) == 0:
+                            fail_reason = "no_detect"
+                        elif len(valid) == 0:
+                            fail_reason = "low_conf"
+                        else:
+                            fail_reason = "missing_person"
 
-                    bbox_out = [[*b.xyxy, round(b.confidence, 4)]
-                                for b in boxes] if boxes else []
-                    if frame_ok:
-                        fail_reason = None
-                    elif len(boxes) == 0:
-                        fail_reason = "no_detect"
-                    elif len(valid) == 0:
-                        fail_reason = "low_conf"
-                    else:
-                        fail_reason = "missing_person"
-
-                    row = _make_row(fid, fps, action_ids, chunk_idx,
-                                    bbox_out, frame_ok, fail_reason)
-                    rows.append(row)
+                        row = _make_row(fid, fps, action_ids, chunk_idx,
+                                        bbox_out, frame_ok, fail_reason)
+                        rows.append(row)
         finally:
             cap.release()
 
@@ -360,11 +390,12 @@ class DetectionPipeline:
     # ──────────── retry detect ────────────
 
     def _detect_with_retry(self, frame: np.ndarray,
+                           initial_boxes: list[PersonBox] | None,
                            tracker, n_expected: int,
                            stats: DetectionVideoStats) -> list[PersonBox]:
         """YOLO detect với retry. Trả về best boxes.
 
-        Attempt 0 (original): imgsz mặc định (YOLO tự quyết)
+        Attempt 0 (original): imgsz mặc định (dùng initial_boxes từ batch)
         Retry 1: imgsz=imgsz_retry (1280) + augment=tta
         Retry 2: preprocess ảnh (brightness / CLAHE) + imgsz mặc định
         """
@@ -373,7 +404,7 @@ class DetectionPipeline:
         best_max_conf = -1.0
 
         # Attempt 0 — original
-        attempt_boxes = self.yolo.detect(frame)
+        attempt_boxes = initial_boxes if initial_boxes is not None else self.yolo.detect(frame)
         best_boxes, best_valid_count, best_max_conf = self._pick_best(
             attempt_boxes, best_boxes, best_valid_count, best_max_conf)
 

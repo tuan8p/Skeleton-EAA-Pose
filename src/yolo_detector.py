@@ -77,6 +77,47 @@ class YOLODetector:
         boxes.sort(key=lambda b: b.confidence, reverse=True)
         return boxes[: self.max_detections]
 
+    def detect_batch(self, frames_bgr: list[np.ndarray],
+                     batch_size: int = 16,
+                     imgsz: int | None = None) -> list[list[PersonBox]]:
+        """Detect person tren mot batch frames de toi uu VRAM/toc do.
+
+        Args:
+            frames_bgr: Danh sach cac anh BGR numpy array.
+            batch_size: So luong anh xu ly cung luc (tu config).
+            imgsz: Kich thuoc inference.
+        """
+        if self._model is None or not frames_bgr:
+            return [[] for _ in range(len(frames_bgr))]
+        
+        kwargs: dict = dict(
+            conf=self.conf_threshold,
+            iou=self.iou_threshold,
+            classes=[PERSON_CLASS_ID],
+            verbose=False,
+            augment=False,
+            batch=batch_size,
+            stream=True,  # Toi uu bo nho khi tra ve nhieu ket qua
+        )
+        if imgsz is not None:
+            kwargs["imgsz"] = imgsz
+            
+        # stream=True tra ve generator
+        results_gen = self._model.predict(frames_bgr, **kwargs)
+        
+        batch_boxes: list[list[PersonBox]] = []
+        for result in results_gen:
+            boxes: list[PersonBox] = []
+            if result.boxes is not None:
+                for b in result.boxes:
+                    x1, y1, x2, y2 = (int(v) for v in b.xyxy[0].tolist())
+                    boxes.append(PersonBox(xyxy=(x1, y1, x2, y2), confidence=float(b.conf[0])))
+                boxes.sort(key=lambda b: b.confidence, reverse=True)
+                boxes = boxes[: self.max_detections]
+            batch_boxes.append(boxes)
+            
+        return batch_boxes
+
     @staticmethod
     def match_by_iou(prev: list[PersonBox], curr: list[PersonBox]) -> list[PersonBox]:
         """Sap xep curr sao cho thu tu person nhat quan voi prev (greedy IoU)."""
