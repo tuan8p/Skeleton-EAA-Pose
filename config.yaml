@@ -12,7 +12,7 @@ mediapipe:
   static_image_mode: false
 
 yolo:
-  model_name: "yolo26l.pt"    # Ultralytics YOLO26 nano (CPU-friendly)
+  model_name: "yolo26x.pt"    # Ultralytics YOLO26 nano (CPU-friendly)
   batch_size: 16
   conf_threshold: 0.2
   iou_threshold: 0.7
