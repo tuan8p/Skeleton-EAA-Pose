@@ -1,0 +1,108 @@
+dataset: PKU
+mediapipe:
+  model_path: models/pose_landmarker_full.task
+  num_poses: 1
+  min_detection_confidence: 0.5
+  min_presence_confidence: 0.5
+  min_tracking_confidence: 0.5
+  static_image_mode: false
+yolo:
+  model_name: yolo26x.pt
+  batch_size: 32
+  conf_threshold: 0.2
+  iou_threshold: 0.7
+  max_detections: 2
+  tracker: iou
+depth:
+  enabled: false
+  gray_to_m: 0.256
+  scale_to_rgb: true
+  masking:
+    enabled: true
+    min_delta: 15
+    fill_color:
+    - 128
+    - 128
+    - 128
+  intrinsics:
+    fx: 1059.29
+    fy: 1059.32
+    cx: 962.9
+    cy: 543.4
+preprocessing:
+  resize:
+    enabled: true
+    width: 640
+    height: 640
+    keep_ratio: true
+  clahe:
+    enabled: true
+    clip_limit: 2.0
+    tile_grid_size: 8
+  gamma:
+    enabled: true
+    value: 0.8
+  denoise:
+    enabled: true
+    method: bilateral
+    strength: 5
+thresholds:
+  confidence: 0.2
+  max_nan_ratio: 0.45
+validator:
+  max_retries: 2
+interpolation:
+  max_gap: 3
+temporal:
+  empty_run_frames: 30
+  neighbor_conf: null
+  bbox_interp_max_gap: 30
+scaling:
+  enabled: true
+  root_idx: 0
+  spine_idx: 1
+chunk:
+  max_actions_per_chunk: 5
+pku:
+  interactive_action_ids:
+  - 12
+  - 14
+  - 16
+  - 18
+  - 21
+  - 24
+  - 26
+  - 27
+  video_ext: .avi
+  label_ext: .txt
+tsu:
+  video_ext: .mp4
+  has_header: true
+  event_column: 0
+  start_column: 1
+  end_column: 2
+  event_map: {}
+  event_mapping_path: event_mapping.csv
+output:
+  coordinate_mode: world
+  save_2d_in_jsonl: true
+paths:
+  video_dir: D:\Downloads\ĐATN\RGB_PKUMMDv1
+  output_dir: /content/drive/MyDrive/skeletons
+  log_dir: /content/drive/MyDrive/logs
+  failed_frames_dir: /content/drive/MyDrive/failed_frames
+  annotation_dir: D:\Downloads\ĐATN\PKU-MMD\Label_PKUMMD
+  depth_dir: /content/drive/MyDrive/PKU-MMD/DEPTH_PKUMMD
+runtime:
+  num_workers: 2
+  max_segments_per_video: null
+  max_chunks_per_video: null
+  log_level: INFO
+detection:
+  output_dir: D:\Downloads\ĐATN
+  retry:
+    max_retries: 2
+    imgsz_retry: 1280
+    tta: false
+    brightness_delta: 30
+    clahe_on_retry: true

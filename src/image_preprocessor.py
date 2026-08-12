@@ -27,21 +27,8 @@ class ImagePreprocessor:
         self.denoise_method = str(cfg.get("preprocessing.denoise.method", "bilateral"))
         self.denoise_strength = int(cfg.get("preprocessing.denoise.strength", 5))
 
-    def process(self, frame: np.ndarray) -> tuple[np.ndarray, tuple[float, int, int]]:
-        h0, w0 = frame.shape[:2]
-        scale, pad_x, pad_y = 1.0, 0, 0
-        out = frame
-        if self.resize_on:
-            if self.keep_ratio:
-                scale = min(self.out_w / w0, self.out_h / h0)
-                new_w, new_h = max(1, int(w0 * scale)), max(1, int(h0 * scale))
-                resized = cv2.resize(out, (new_w, new_h))
-                canvas = np.zeros((self.out_h, self.out_w, 3), dtype=resized.dtype)
-                pad_x, pad_y = (self.out_w - new_w) // 2, (self.out_h - new_h) // 2
-                canvas[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
-                out = canvas
-            else:
-                out = cv2.resize(out, (self.out_w, self.out_h))
+    def process_retry1(self, frame: np.ndarray) -> tuple[np.ndarray, tuple[float, int, int, int, int]]:
+        out = frame.copy()
         if self.gamma_on:
             table = (np.arange(256, dtype=np.float32) / 255.0) ** self.gamma_val * 255.0
             out = cv2.LUT(out, table.astype(np.uint8))
@@ -51,23 +38,28 @@ class ImagePreprocessor:
                                     tileGridSize=(self.clahe_grid, self.clahe_grid))
             lab[:, :, 0] = clahe.apply(lab[:, :, 0])
             out = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        h0, w0 = out.shape[:2]
+        return out, (1.0, 0, 0, w0, h0)
+
+    def process_retry2(self, frame: np.ndarray) -> tuple[np.ndarray, tuple[float, int, int, int, int]]:
+        out = frame.copy()
         if self.denoise_on:
-            if self.denoise_method == "bilateral":
-                out = cv2.bilateralFilter(out, self.denoise_strength,
-                                          self.denoise_strength * 2, self.denoise_strength / 2)
-            else:
-                k = self.denoise_strength | 1
-                out = cv2.GaussianBlur(out, (k, k), 0)
-        return out, (scale, pad_x, pad_y)
+            k = self.denoise_strength | 1
+            out = cv2.GaussianBlur(out, (k, k), 0)
+        
+        h0, w0 = out.shape[:2]
+        size = max(h0, w0)
+        canvas = np.zeros((size, size, 3), dtype=out.dtype)
+        pad_x, pad_y = (size - w0) // 2, (size - h0) // 2
+        canvas[pad_y:pad_y + h0, pad_x:pad_x + w0] = out
+        return canvas, (1.0, pad_x, pad_y, size, size)
 
     @staticmethod
     def to_original_coords(norm_xy: np.ndarray, orig_wh: tuple[int, int],
-                           transform: tuple[float, int, int],
-                           out_wh: tuple[int, int]) -> np.ndarray:
+                           transform: tuple[float, int, int, int, int]) -> np.ndarray:
         """Anh xa toa do normalized tren anh da preprocess ve normalized tren frame goc."""
-        scale, pad_x, pad_y = transform
+        scale, pad_x, pad_y, out_w, out_h = transform
         w0, h0 = orig_wh
-        out_w, out_h = out_wh
         xy = norm_xy.copy()
         xy[:, 0] = (norm_xy[:, 0] * out_w - pad_x) / (scale * w0)
         xy[:, 1] = (norm_xy[:, 1] * out_h - pad_y) / (scale * h0)

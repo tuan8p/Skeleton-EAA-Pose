@@ -24,7 +24,7 @@ SPATIAL_PARENT: dict[int, int] = {
 
 class SkeletonInterpolator:
     def __init__(self, cfg: ConfigManager):
-        self.max_gap = int(cfg.get("interpolation.max_gap", 3))
+        self.max_gap = int(cfg.get("temporal.empty_run_frames", 30))
 
     def interpolate(self, skel: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """skel (T, P, J, 3) -> (ban sao da noi suy, filled[T]) voi filled[t]=True

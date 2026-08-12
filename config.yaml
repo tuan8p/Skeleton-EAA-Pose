@@ -65,12 +65,15 @@ interpolation:
 temporal:
   empty_run_frames: 30   # chuoi frame trong >= N -> thuc su khong nguoi (TN)
   neighbor_conf: null        # conf lan can "cao" de ket luan FN; null = thresholds.confidence
-  bbox_interp_max_gap: 30  # chi noi suy bbox cho chuoi FN ngan hon N frame
+  bbox_interp_max_gap: 10  # chi noi suy bbox cho chuoi FN ngan hon N frame
 
 scaling:
   enabled: true          # chuan hoa ty le: chia cho mean |SpineMid - SpineBase|
   root_idx: 0            # SpineBase
   spine_idx: 1           # SpineMid
+
+pose:
+  bbox_buffer_ratio: 0.1 # Them buffer 10% moi canh khi crop bbox
 
 chunk:
   max_actions_per_chunk: 5

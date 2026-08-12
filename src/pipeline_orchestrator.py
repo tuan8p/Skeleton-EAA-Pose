@@ -76,6 +76,7 @@ class PipelineOrchestrator:
         if self.neighbor_conf is None:
             self.neighbor_conf = float(self.cfg.get("thresholds.confidence", 0.5))
         self.bbox_interp_max_gap = int(self.cfg.get("temporal.bbox_interp_max_gap", 30))
+        self.bbox_buffer_ratio = float(self.cfg.get("pose.bbox_buffer_ratio", 0.1))
 
     # ---------------- public ----------------
     def run_batch(self, start: int = 0, end: int | None = None) -> None:
@@ -355,7 +356,7 @@ class PipelineOrchestrator:
         confs: list[float] = []
         person_errors: list[str] = []
         for p, box in enumerate(det.boxes[:n_expected]):
-            crop, (x0, y0) = box.crop(frame)
+            crop, (x0, y0) = box.crop(frame, margin=self.bbox_buffer_ratio)
             if crop.size == 0:
                 person_errors.append(ERR_NO_DETECT)
                 continue
@@ -436,15 +437,18 @@ class PipelineOrchestrator:
 
     # ---------------- helpers ----------------
     def _attempts(self, frame: np.ndarray):
-        """Cac bien the anh de thu: [preprocessed, raw] luan phien theo so retry."""
-        proc, tfm = self.preprocessor.process(frame)
-        variants = [(proc, tfm), (frame, (1.0, 0, 0))]
-        for i in range(self.max_retries + 1):
-            yield variants[i % 2]
+        """Cac bien the anh de thu: [raw, retry1, retry2] theo thu tu."""
+        h0, w0 = frame.shape[:2]
+        yield frame, (1.0, 0, 0, w0, h0)
+        if self.max_retries >= 1:
+            yield self.preprocessor.process_retry1(frame)
+        if self.max_retries >= 2:
+            yield self.preprocessor.process_retry2(frame)
 
     def _extract_with_retry(self, frame: np.ndarray):
         """Tra ve (PoseResult|None, transform, so_lan_retry)."""
-        result, best_tfm, retries = None, (1.0, 0, 0), 0
+        h0, w0 = frame.shape[:2]
+        result, best_tfm, retries = None, (1.0, 0, 0, w0, h0), 0
         for img, tfm in self._attempts(frame):
             res = self.pose.process(img)
             if res is None:
@@ -460,15 +464,14 @@ class PipelineOrchestrator:
                 crop_wh: tuple[int, int] | None) -> np.ndarray:
         """Landmarks 2D normalized theo frame goc (bun letterbox + crop offset)."""
         fh, fw = frame_hw
-        out_wh = (self.preprocessor.out_w, self.preprocessor.out_h)
         lm2d = Mapper.map_coords(res.image_landmarks)[:, :2]
         if crop_wh is not None:
             cw, ch = crop_wh
-            lm2d = ImagePreprocessor.to_original_coords(lm2d, (cw, ch), tfm, out_wh)
+            lm2d = ImagePreprocessor.to_original_coords(lm2d, (cw, ch), tfm)
             lm2d[:, 0] = (lm2d[:, 0] * cw + crop_offset[0]) / fw
             lm2d[:, 1] = (lm2d[:, 1] * ch + crop_offset[1]) / fh
         else:
-            lm2d = ImagePreprocessor.to_original_coords(lm2d, (fw, fh), tfm, out_wh)
+            lm2d = ImagePreprocessor.to_original_coords(lm2d, (fw, fh), tfm)
         return lm2d
 
     def _meta_row(self, fid: int, fps: float, action_ids,

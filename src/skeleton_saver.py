@@ -23,8 +23,9 @@ class SkeletonSaver:
         self.output_dir = Path(cfg.get("paths.output_dir"))
         self.chunk_npy_dir = self.output_dir / "chunks" / "npy"
         self.chunk_jsonl_dir = self.output_dir / "chunks" / "jsonl"
+        self.chunk_csv_dir = self.output_dir / "chunks" / "csv"
         self.failed_dir = Path(cfg.get("paths.failed_frames_dir"))
-        for d in (self.chunk_npy_dir, self.chunk_jsonl_dir, self.failed_dir):
+        for d in (self.chunk_npy_dir, self.chunk_jsonl_dir, self.chunk_csv_dir, self.failed_dir):
             d.mkdir(parents=True, exist_ok=True)
 
     def npy_path(self, video_name: str, chunk_index: int) -> Path:
@@ -40,6 +41,8 @@ class SkeletonSaver:
     def save_chunk(self, video_name: str, chunk_index: int,
                    skeleton: np.ndarray, metadata_rows: list[dict],
                    segments: list[dict] | None = None) -> None:
+        # Convert NaN to 0.0 as requested for failed/empty cases
+        skeleton = np.nan_to_num(skeleton, nan=0.0)
         np.save(self.npy_path(video_name, chunk_index),
                 skeleton.astype(np.float32, copy=False))
         with open(self.jsonl_path(video_name, chunk_index), "w", encoding="utf-8") as f:
@@ -53,6 +56,22 @@ class SkeletonSaver:
             with open(meta_dir / f"{video_name}_chunk_{chunk_index:03d}.json",
                       "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=1)
+
+        # Save CSV format
+        import csv
+        csv_path = self.chunk_csv_dir / f"{video_name}_chunk_{chunk_index:03d}.csv"
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            header = ["frame_id"]
+            for p in (1, 2):
+                for j in range(1, 26):
+                    header.extend([f"p{p}_x{j}", f"p{p}_y{j}", f"p{p}_z{j}"])
+            writer.writerow(header)
+            for t, row_meta in enumerate(metadata_rows):
+                row_data = [row_meta["frame_id"]]
+                flat = skeleton[t].flatten().round(4).tolist()
+                row_data.extend(flat)
+                writer.writerow(row_data)
 
     def save_failed_frame(self, video_name: str, frame_id: int, error_type: str,
                           frame: np.ndarray, draw_boxes: list | None = None) -> None:

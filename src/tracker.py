@@ -29,6 +29,13 @@ class IoUTracker(BasePersonTracker):
         self._prev = []
 
     def update(self, boxes: list[PersonBox], frame: np.ndarray) -> list[PersonBox]:
+        if not boxes:
+            return []
+        if not self._prev:
+            # Khung hinh dau tien: sap xep tu trai sang phai (Left to Right)
+            ordered = sorted(boxes, key=lambda b: b.xyxy[0])
+            self._prev = ordered
+            return ordered
         ordered = YOLODetector.match_by_iou(self._prev, boxes)
         self._prev = ordered
         return ordered
