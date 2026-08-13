@@ -56,13 +56,12 @@ class PipelineOrchestrator:
         self.reader = get_annotation_reader(self.cfg)
         self.preprocessor = ImagePreprocessor(self.cfg)
         self.pose = pose_extractor if pose_extractor is not None else PoseExtractor(self.cfg)
-        self.yolo = yolo_detector if yolo_detector is not None else YOLODetector(self.cfg)
         self.validator = Validator(self.cfg)
         self.interpolator = SkeletonInterpolator(self.cfg)
         self.scaler = SkeletonScaler(self.cfg)
         self.saver = SkeletonSaver(self.cfg)
         self.depth = DepthProcessor(self.cfg)
-        self.tracker = get_person_tracker(self.cfg)
+        self.detection_dir = Path(self.cfg.get("detection.output_dir", "outputs_detect"))
         output_dir = Path(self.cfg.get("paths.output_dir"))
         self.progress = ProgressManager(output_dir / "progress.json")
         self.max_retries = int(self.cfg.get("validator.max_retries", 2))
@@ -165,33 +164,42 @@ class PipelineOrchestrator:
         return intervals
 
     # ---------------- pha 1: detect + temporal FN/TN ----------------
-    def _detect_pass(self, video_path: str, intervals, stats: VideoStats,
+    def _detect_pass(self, video_name: str, video_path: str, intervals, stats: VideoStats,
                      label_is_interactive: list[bool]) -> list[_FrameDetect]:
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise IOError(f"Khong mo duoc video: {video_path}")
-        self.tracker.reset()
+        import json
+        jsonl_path = self.detection_dir / ("PKU" if self.is_pku else "TSU") / f"{video_name}.jsonl"
+        frame_data = {}
+        if jsonl_path.exists():
+            with open(jsonl_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        d = json.loads(line)
+                        frame_data[d["frame_id"]] = d
+                    except:
+                        pass
+        else:
+            import logging
+            logging.getLogger("pipeline").warning(f"Khong tim thay file JSONL detect: {jsonl_path}")
+
         detects: list[_FrameDetect] = []
         for (start, end, _ids), interactive in zip(intervals, label_is_interactive):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, start - 1)
             for fid in range(start, end + 1):
-                ok, frame = cap.read()
-                if not ok:
-                    detects.append(_FrameDetect(fid, []))
-                    continue
-                boxes = self.yolo.detect(frame)
+                d = frame_data.get(fid)
+                boxes = []
+                if d and d.get("bboxes"):
+                    for b in d["bboxes"]:
+                        if len(b) >= 5:
+                            boxes.append(PersonBox((int(b[0]), int(b[1]), int(b[2]), int(b[3])), float(b[4])))
                 stats.detect_total += 1
                 if boxes:
                     stats.detect_ok += 1
                     stats.detect_confs.append(max(b.confidence for b in boxes))
+                
                 valid = [b for b in boxes if b.confidence >= self.neighbor_conf]
-                if interactive:
-                    valid = self.tracker.update(valid, frame)
-                    detects.append(_FrameDetect(fid, valid[:NUM_PERSONS]))
-                else:
-                    best = max(valid, key=lambda b: b.confidence) if valid else None
-                    detects.append(_FrameDetect(fid, [best] if best else []))
-        cap.release()
+                if not interactive and valid:
+                    valid = [max(valid, key=lambda b: b.confidence)]
+                detects.append(_FrameDetect(fid, valid[:NUM_PERSONS]))
+        
         self._classify_empty_runs(detects, stats)
         return detects
 
@@ -254,7 +262,7 @@ class PipelineOrchestrator:
                        stats: VideoStats, has_depth: bool, disable_pbar: bool = False):
         label_is_interactive = [any(a in self.interactive_ids for a in ids)
                                 for _, _, ids in intervals]
-        detects = self._detect_pass(video_path, intervals, stats, label_is_interactive)
+        detects = self._detect_pass(video_name, video_path, intervals, stats, label_is_interactive)
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         total = sum(e - s + 1 for s, e, _ in intervals)
@@ -301,16 +309,7 @@ class PipelineOrchestrator:
             skel = np.zeros((NUM_PERSONS, NUM_NTU_JOINTS, 3), dtype=np.float32)
             return skel, self._meta_row(fid, fps, action_ids, {"no_person": True},
                                         None, None, None)
-        # FN: retry detect toi da 2 lan voi bien the anh truoc khi dung bbox noi suy
-        if not det.boxes:
-            for img, _tfm in self._attempts(frame):
-                retry_boxes = self.yolo.detect(img)
-                valid = [b for b in retry_boxes if b.confidence >= self.neighbor_conf]
-                stats.retry_count += 1
-                if valid:
-                    det.boxes = self.tracker.update(valid, frame)[:NUM_PERSONS] \
-                        if interactive else [max(valid, key=lambda b: b.confidence)]
-                    break
+        # FN: su dung truc tiep bbox tu JSONL, hoac da duoc bbox interpolation, KHONG retry YOLO
         skel, err, extra, lm2d, confs, retries, vis_list = self._pose_frame(
             frame, det, interactive, stats, depth_map)
         stats.retry_count += retries
