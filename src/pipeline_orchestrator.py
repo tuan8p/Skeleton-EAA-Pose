@@ -106,30 +106,28 @@ class PipelineOrchestrator:
             logging.getLogger("pipeline").warning(
                 f"{video_name}: coordinate_mode=camera nhung khong co depth -> "
                 "fallback BlazePose world")
-        chunks = self._build_chunks(segments)
-        for chunk_idx, segs in enumerate(chunks):
-            if self.progress.is_chunk_done(video_name, chunk_idx) and \
-                    self.saver.chunk_exists(video_name, chunk_idx):
-                continue
-            intervals = self._union_intervals(segs)
-            skeleton, meta_rows, fps = self._process_chunk(
-                video_name, video_path, intervals, stats, has_depth)
-            skeleton, filled = self.interpolator.interpolate(skeleton)
-            stats.interpolated_frames.extend(
-                row["frame_id"] for row, f in zip(meta_rows, filled) if f)
-            skeleton = self.scaler.scale(skeleton)
-            oks = self._evaluate_chunk(skeleton, intervals, meta_rows)
-            for ok, row in zip(oks, meta_rows):
-                row["ok"] = ok
-            stats.ok_frames += sum(oks)
-            stats.bad_frames.extend(row["frame_id"] for ok, row in zip(oks, meta_rows)
-                                    if not ok)
-            stats.video_fps = fps
-            self.saver.save_chunk(video_name, chunk_idx, skeleton, meta_rows,
-                                  segments=[{"action_id": s.action_id,
-                                             "start": s.start_frame,
-                                             "end": s.end_frame} for s in segs])
-            self.progress.mark_chunk_done(video_name, chunk_idx, len(chunks))
+        
+        segs = sorted(segments, key=lambda s: s.start_frame)
+        intervals = self._union_intervals(segs)
+        
+        skeleton, meta_rows, fps = self._process_chunk(
+            video_name, video_path, intervals, stats, has_depth)
+        
+        skeleton, filled = self.interpolator.interpolate(skeleton)
+        stats.interpolated_frames.extend(
+            row["frame_id"] for row, f in zip(meta_rows, filled) if f)
+        
+        skeleton = self.scaler.scale(skeleton)
+        oks = self._evaluate_chunk(skeleton, intervals, meta_rows)
+        for ok, row in zip(oks, meta_rows):
+            row["ok"] = ok
+            
+        stats.ok_frames += sum(oks)
+        stats.bad_frames.extend(row["frame_id"] for ok, row in zip(oks, meta_rows) if not ok)
+        stats.video_fps = fps
+        
+        self.saver.save_video(video_name, skeleton, meta_rows)
+        
         stats.finish()
         self.depth.close()
         self.progress.mark_video_done(video_name)
@@ -140,13 +138,6 @@ class PipelineOrchestrator:
         if callable(close):
             close()
         self.depth.close()
-
-    # ---------------- chunk building (overlap dung chung) ----------------
-    def _build_chunks(self, segments: list[ActionSegment]) -> list[list[ActionSegment]]:
-        """Gom toi da N segment/chunk. KHONG cat overlap."""
-        max_per_chunk = int(self.cfg.get("chunk.max_actions_per_chunk", 5))
-        segs = sorted(segments, key=lambda s: s.start_frame)
-        return [segs[i:i + max_per_chunk] for i in range(0, len(segs), max_per_chunk)]
 
     @staticmethod
     def _union_intervals(segs: list[ActionSegment]) -> list[tuple[int, int, list[int]]]:

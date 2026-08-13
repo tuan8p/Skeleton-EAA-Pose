@@ -21,45 +21,17 @@ class SkeletonSaver:
 
     def __init__(self, cfg: ConfigManager):
         self.output_dir = Path(cfg.get("paths.output_dir"))
-        self.chunk_npy_dir = self.output_dir / "chunks" / "npy"
-        self.chunk_jsonl_dir = self.output_dir / "chunks" / "jsonl"
-        self.chunk_csv_dir = self.output_dir / "chunks" / "csv"
+        self.csv_dir = self.output_dir / "csv"
         self.failed_dir = Path(cfg.get("paths.failed_frames_dir"))
-        for d in (self.chunk_npy_dir, self.chunk_jsonl_dir, self.chunk_csv_dir, self.failed_dir):
+        for d in (self.csv_dir, self.failed_dir):
             d.mkdir(parents=True, exist_ok=True)
 
-    def npy_path(self, video_name: str, chunk_index: int) -> Path:
-        return self.chunk_npy_dir / f"{video_name}_chunk_{chunk_index:03d}.npy"
-
-    def jsonl_path(self, video_name: str, chunk_index: int) -> Path:
-        return self.chunk_jsonl_dir / f"{video_name}_chunk_{chunk_index:03d}.jsonl"
-
-    def chunk_exists(self, video_name: str, chunk_index: int) -> bool:
-        return self.npy_path(video_name, chunk_index).exists() and \
-            self.jsonl_path(video_name, chunk_index).exists()
-
-    def save_chunk(self, video_name: str, chunk_index: int,
-                   skeleton: np.ndarray, metadata_rows: list[dict],
-                   segments: list[dict] | None = None) -> None:
+    def save_video(self, video_name: str, skeleton: np.ndarray, metadata_rows: list[dict]) -> None:
         # Convert NaN to 0.0 as requested for failed/empty cases
         skeleton = np.nan_to_num(skeleton, nan=0.0)
-        np.save(self.npy_path(video_name, chunk_index),
-                skeleton.astype(np.float32, copy=False))
-        with open(self.jsonl_path(video_name, chunk_index), "w", encoding="utf-8") as f:
-            for row in metadata_rows:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        if segments is not None:
-            meta_dir = self.output_dir / "chunks" / "meta"
-            meta_dir.mkdir(parents=True, exist_ok=True)
-            meta = {"video_name": video_name, "chunk_index": chunk_index,
-                    "segments": segments}
-            with open(meta_dir / f"{video_name}_chunk_{chunk_index:03d}.json",
-                      "w", encoding="utf-8") as f:
-                json.dump(meta, f, indent=1)
-
-        # Save CSV format
+        
         import csv
-        csv_path = self.chunk_csv_dir / f"{video_name}_chunk_{chunk_index:03d}.csv"
+        csv_path = self.csv_dir / f"{video_name}.csv"
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             header = ["frame_id"]
