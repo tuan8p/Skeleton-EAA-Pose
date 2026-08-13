@@ -97,6 +97,9 @@ class VideoStats:
             "conf_mode": round(self.conf_mode, 2),
         }
 
+    def to_dict(self) -> dict:
+        return self.summary_row()
+
 
 class PipelineLogger:
     def __init__(self, cfg: ConfigManager, batch_start: int, batch_end: int):
