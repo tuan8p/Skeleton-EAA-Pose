@@ -22,7 +22,7 @@ class SkeletonSaver:
     def __init__(self, cfg: ConfigManager):
         self.output_dir = Path(cfg.get("paths.output_dir"))
         self.csv_dir = self.output_dir / "csv"
-        self.failed_dir = Path(cfg.get("paths.failed_frames_dir"))
+        self.failed_dir = self.output_dir / "failed_frames"
         for d in (self.csv_dir, self.failed_dir):
             d.mkdir(parents=True, exist_ok=True)
 

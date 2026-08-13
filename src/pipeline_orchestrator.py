@@ -17,6 +17,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import threading
 
 from .action_segment import ActionSegment
 from .annotation_reader import get_annotation_reader
@@ -55,7 +56,10 @@ class PipelineOrchestrator:
         self.cfg = cfg or ConfigManager(config_path)
         self.reader = get_annotation_reader(self.cfg)
         self.preprocessor = ImagePreprocessor(self.cfg)
-        self.pose = pose_extractor if pose_extractor is not None else PoseExtractor(self.cfg)
+        
+        self._thread_local = threading.local()
+        self._pose_extractor = pose_extractor
+        
         self.validator = Validator(self.cfg)
         self.interpolator = SkeletonInterpolator(self.cfg)
         self.scaler = SkeletonScaler(self.cfg)
@@ -76,6 +80,14 @@ class PipelineOrchestrator:
             self.neighbor_conf = float(self.cfg.get("thresholds.confidence", 0.5))
         self.bbox_interp_max_gap = int(self.cfg.get("temporal.bbox_interp_max_gap", 30))
         self.bbox_buffer_ratio = float(self.cfg.get("pose.bbox_buffer_ratio", 0.1))
+
+    @property
+    def pose(self) -> PoseExtractor:
+        if self._pose_extractor is not None:
+            return self._pose_extractor
+        if not hasattr(self._thread_local, "pose"):
+            self._thread_local.pose = PoseExtractor(self.cfg)
+        return self._thread_local.pose
 
     # ---------------- public ----------------
     def run_batch(self, start: int = 0, end: int | None = None) -> None:

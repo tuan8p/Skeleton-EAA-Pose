@@ -3,7 +3,7 @@ opencv-python
 numpy
 scipy
 pyyaml
-ultralytics
+# ultralytics
 boxmot          # DeepOCSORT tracker (video 2 nguoi PKU)
 torch
 tqdm
