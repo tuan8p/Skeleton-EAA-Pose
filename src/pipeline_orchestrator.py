@@ -105,7 +105,7 @@ class PipelineOrchestrator:
                         f"video_ok={stats.video_ok}")
         self.close()
 
-    def process_video(self, video_name: str, disable_pbar: bool = False) -> VideoStats:
+    def process_video(self, video_name: str) -> VideoStats:
         stats = VideoStats(video_name)
         segments = self.reader.read(video_name)
         if self.max_segments:
@@ -122,7 +122,7 @@ class PipelineOrchestrator:
         intervals = self._union_intervals(segs)
         
         skeleton, meta_rows, fps = self._process_chunk(
-            video_name, video_path, intervals, stats, has_depth, disable_pbar)
+            video_name, video_path, intervals, stats, has_depth)
         
         skeleton, filled = self.interpolator.interpolate(skeleton)
         stats.interpolated_frames.extend(
@@ -271,7 +271,7 @@ class PipelineOrchestrator:
     # ---------------- pha 2: pose per frame ----------------
     def _process_chunk(self, video_name: str, video_path: str,
                        intervals: list[tuple[int, int, list[int]]],
-                       stats: VideoStats, has_depth: bool, disable_pbar: bool = False):
+                       stats: VideoStats, has_depth: bool):
         label_is_interactive = [any(a in self.interactive_ids for a in ids)
                                 for _, _, ids in intervals]
         detects = self._detect_pass(video_name, video_path, intervals, stats, label_is_interactive)
@@ -281,9 +281,6 @@ class PipelineOrchestrator:
         skel = np.full((total, NUM_PERSONS, NUM_NTU_JOINTS, 3), np.nan, dtype=np.float32)
         meta_rows: list[dict] = []
         t = 0
-        from tqdm.auto import tqdm
-        pbar = tqdm(total=total, desc=f"Pose ({video_name})", position=1, leave=False, disable=disable_pbar)
-        
         for (start, end, ids) in intervals:
             cap.set(cv2.CAP_PROP_POS_FRAMES, start - 1)
             interactive = any(a in self.interactive_ids for a in ids)
@@ -308,8 +305,6 @@ class PipelineOrchestrator:
                     video_name, frame, det, fid, fps, ids, interactive, stats, depth_map)
                 meta_rows.append(meta)
                 t += 1
-                pbar.update(1)
-        pbar.close()
         cap.release()
         return skel, meta_rows, fps
 

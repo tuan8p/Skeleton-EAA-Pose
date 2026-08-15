@@ -33,12 +33,9 @@ class ProgressManager:
             entry["total_chunks"] = total_chunks
         self.save()
 
-    def mark_video_done(self, video_name: str, stats: dict | None = None) -> None:
+    def mark_video_done(self, video_name: str) -> None:
         with self._lock:
-            entry = self._data.setdefault(video_name, {})
-            entry["finished"] = True
-            if stats is not None:
-                entry["stats"] = stats
+            self._data.setdefault(video_name, {})["finished"] = True
         self.save()
 
     def save(self) -> None:
