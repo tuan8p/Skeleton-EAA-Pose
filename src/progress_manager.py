@@ -1,4 +1,4 @@
-"""Quan ly progress.json de resume pipeline."""
+"""Manage progress.json for pipeline resume."""
 from __future__ import annotations
 
 import json

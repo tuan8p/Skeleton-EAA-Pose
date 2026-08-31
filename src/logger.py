@@ -1,4 +1,4 @@
-"""Log chi tiet tung video + file thong ke batch (PLAN muc 7).
+"""Log detailed per-video stats + batch summary file.
 
 ok_frames: so frame OK SAU retry + noi suy (frame du joints, khong con NaN;
 action tuong tac can du 2 person). error_frames: loi cung LUC EXTRACT
@@ -26,7 +26,7 @@ class VideoStats:
         self.ok_persons = 0      # so person hop le LUC EXTRACT (frame 2 nguoi: toi da 2)
         self.error_frames: dict[str, list[int]] = defaultdict(list)  # loi luc extract
         self.bad_frames: list[int] = []   # frame con NaN sau noi suy
-        # Thong ke theo YOLO detect:
+        # YOLO detection stats:
         self.detect_total = 0            # so frame da chay YOLO
         self.detect_ok = 0               # so frame co it nhat 1 bbox person
         self.detect_confs: list[float] = []   # conf bbox cao nhat moi frame co detect
@@ -63,7 +63,7 @@ class VideoStats:
 
     @property
     def conf_mode(self) -> float:
-        """Mode cua confidence (lam tron 2 chu so) trong cac frame thanh cong."""
+        """Mode of confidence values (rounded to 2 decimal places) across successful frames."""
         if not self.conf_values:
             return 0.0
         return float(Counter(round(c, 2) for c in self.conf_values).most_common(1)[0][0])

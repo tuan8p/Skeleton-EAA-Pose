@@ -3,8 +3,8 @@ opencv-python
 numpy
 scipy
 pyyaml
-# ultralytics
-boxmot          # DeepOCSORT tracker (video 2 nguoi PKU)
+# ultralytics  # uncomment to install YOLOv8 (or install manually: pip install ultralytics)
+boxmot          # DeepOCSORT tracker for 2-person interactive actions (optional)
 torch
 tqdm
 psutil

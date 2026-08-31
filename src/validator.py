@@ -1,4 +1,4 @@
-"""Validate 25 khop da map: retry, danh dau NaN, phan loai loi frame."""
+"""Validate 25 mapped joints: retry, mark NaN, classify frame errors."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,9 +14,9 @@ ERR_POSE_FAIL = "pose_fail"
 
 @dataclass
 class FrameValidation:
-    skeleton: np.ndarray          # (25, 3) - joint loi = NaN
+    skeleton: np.ndarray          # (25, 3) - failed joint = NaN
     visibility: np.ndarray        # (25,)
-    error_type: str | None        # None neu frame hop le
+    error_type: str | None        # None if frame is valid
     nan_joints: list[int] = field(default_factory=list)
 
 
@@ -27,14 +27,14 @@ class Validator:
         self.max_retries = int(cfg.get("validator.max_retries", 2))
 
     def needs_retry(self, visibility: np.ndarray) -> bool:
-        """Bat ky joint nao co visibility < threshold -> can retry."""
+        """Any joint with visibility < threshold -> needs retry."""
         return bool(np.any(visibility < self.conf_threshold))
 
     def all_low_conf(self, visibility: np.ndarray) -> bool:
         return bool(np.all(visibility < self.conf_threshold))
 
     def finalize(self, skeleton: np.ndarray, visibility: np.ndarray) -> FrameValidation:
-        """Sau khi het retry: joint visibility thap -> NaN; phan loai loi."""
+        """After exhausting retries: low-visibility joints -> NaN; classify error."""
         skel = skeleton.astype(np.float32, copy=True)
         bad = visibility < self.conf_threshold
         skel[bad] = np.nan

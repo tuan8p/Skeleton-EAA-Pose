@@ -1,4 +1,4 @@
-"""Demo overlay: doc .npy + .jsonl, ve skeleton len video goc, xuat video moi.
+"""Demo overlay: load .npy + .jsonl, draw skeleton onto original video, export new video.
 
 Uu tien dung landmarks_2d (normalized theo frame goc) trong jsonl; neu khong co
 thi dung 2 cot dau cua npy (chi dung duoc khi npy luu toa do image normalized).
@@ -11,7 +11,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .mapper import NTU_BONES, NUM_NTU_JOINTS
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.mapper import NTU_BONES, NUM_NTU_JOINTS
 
 
 def _iter_jsonl(path: str | Path):

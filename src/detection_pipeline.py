@@ -1,27 +1,27 @@
-"""Pipeline detection độc lập (không BlazePose / skeleton).
+"""Pipeline detection independent (no BlazePose/skeleton).
 
-Luồng per-video:
-1. Đọc annotation → list[ActionSegment] (đã lọc theo event_mapping TSU / PKU)
-2. Phát hiện video có action tương tác → video_is_interactive → n_expected = 2
+Per-video stream:
+1. Read annotation → list[ActionSegment] (filtered by event_mapping TSU / PKU)
+2. Detect videos with interactive actions → video_is_interactive → n_expected = 2
 3. Chia chunk (≤ chunk.max_actions_per_chunk = 5 segment/chunk)
-4. Per chunk (skip nếu progress đã done VÀ temp jsonl tồn tại):
-   a. Load frame_cache từ chunk trước (overlap frames) nếu resume
+4. Per chunk (skip if progress is done AND temp jsonl exists):
+   a. Load frame_cache from previous chunk (overlap frames) if resume
    b. Reset tracker
    c. _detect_chunk(): union intervals → detect frame (cache-first) → retry
-   d. Ghi temp jsonl → save_chunk_visualize (nếu chunk fail) → mark_chunk_done
-5. Cuối video: merge_to_video_jsonl → write_video_log → mark_video_done
+   d. Write temp jsonl → save_chunk_visualize (if chunk fails) → mark_chunk_done
+5. End of video: merge_to_video_jsonl -> write_video_log -> mark_video_done
 
-Retry strategy (khi frame không đủ n_expected bbox):
-  Attempt 0: YOLO detect gốc
-  Retry 1:   YOLO với imgsz=imgsz_retry (1280) + augment=tta
-  Retry 2:   Preprocess ảnh (brightness + CLAHE nếu bật) → YOLO gốc
+Retry strategy (when frame does not have enough n_expected bbox):
+  Attempt 0: Original YOLO detect
+  Retry 1: YOLO with imgsz=imgsz_retry (1280) + augment=tta
+  Retry 2: Preprocess image (brightness + CLAHE if enabled) → Original YOLO
 
-Frame cache: {fid: list[PersonBox]} sống xuyên suốt video.
-  - Overlap frames giữa chunk A-1 và chunk A: served từ cache (không detect lại)
-  - Resume: load lại từ temp jsonl của chunk A-1 để populate cache
+Frame cache: {fid: list[PersonBox]} lives throughout the video.
+  - Overlap frames between chunk A-1 and chunk A: served from cache (not detected again)
+  - Resume: reload from temp jsonl of chunk A-1 to populate cache
 
-Dedup stats: mỗi frame_id chỉ count 1 lần vào total_frames/ok/fail
-  (tránh double-count khi frame xuất hiện trong union của 2 chunk khác nhau)
+Dedup stats: each frame_id only counts once in total_frames/ok/fail
+  (avoid double-count when frame appears in union of 2 different chunks)
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ from .tracker import get_person_tracker
 from .yolo_detector import PersonBox, YOLODetector
 
 NUM_PERSONS = 2
-# PKU interactive action IDs: cần 2 người
+# PKU interactive action IDs: requires 2 people
 _DEFAULT_INTERACTIVE_IDS = {12, 14, 16, 18, 21, 24, 26, 27}
 
 
@@ -53,9 +53,9 @@ def _build_chunks(segments: list[ActionSegment],
 
 
 def _union_intervals(segs: list[ActionSegment]) -> list[tuple[int, int, list[int]]]:
-    """Hợp nhất [start, end] chồng lặp → list (start, end, [action_ids]).
+    """Merge [start, end] duplicates → list (start, end, [action_ids]).
 
-    Mỗi frame chỉ xuất hiện 1 lần trong kết quả; vùng giao mang nhiều action_id.
+    Each frame appears only once in the results; intersection area carries multiple action_id.
     """
     events: list[tuple[int, int, int]] = []
     for s in segs:
@@ -80,14 +80,14 @@ def _union_intervals(segs: list[ActionSegment]) -> list[tuple[int, int, list[int
 def _make_row(fid: int, fps: float, action_ids: list[int],
               chunk_idx: int, bboxes: list,
               ok: bool, fail_reason: str | None) -> dict:
-    """Tạo 1 dòng metadata frame cho output jsonl."""
+    """Create 1 line of metadata frame for jsonl output."""
     aid_out = action_ids[0] if len(action_ids) == 1 else action_ids
     return {
         "frame_id": int(fid),
         "timestamp": round(fid / fps, 4),
         "action_id": aid_out,
         "chunk_index": chunk_idx,
-        "bboxes": bboxes,       # [[x1,y1,x2,y2,conf], ...]  tọa độ frame gốc
+        "bboxes": bboxes,       # [[x1,y1,x2,y2,conf], ...] original frame coordinates
         "n_persons": len(bboxes),
         "ok": ok,
         "fail_reason": fail_reason,  # "no_detect" | "low_conf" | "missing_person" | null
@@ -97,7 +97,7 @@ def _make_row(fid: int, fps: float, action_ids: list[int],
 def _apply_retry_preproc(frame: np.ndarray,
                          brightness_delta: int,
                          clahe_on: bool) -> np.ndarray:
-    """Áp dụng tiền xử lý nhẹ cho retry: brightness + CLAHE (tùy chọn)."""
+    """Apply light preprocessing to retry: brightness + CLAHE (optional)."""
     out = frame.copy()
     if brightness_delta != 0:
         out = cv2.convertScaleAbs(out, alpha=1.0, beta=brightness_delta)
@@ -182,7 +182,7 @@ class DetectionPipeline:
                 logger.info(msg)
                 tqdm.write(msg)
             except Exception as exc:
-                msg_err = f"Lỗi video {video_name}: {exc}"
+                msg_err = f"Video error {video_name}: {exc}"
                 logger.warning(msg_err)
                 tqdm.write(msg_err)
                 import traceback
@@ -211,25 +211,25 @@ class DetectionPipeline:
 
         video_path = segments[0].video_path
 
-        # Lấy FPS
+        # Get FPS
         cap_probe = cv2.VideoCapture(video_path)
         fps = cap_probe.get(cv2.CAP_PROP_FPS) or 30.0
         cap_probe.release()
         stats.video_fps = fps
 
-        # Phát hiện video có action tương tác không (PKU only)
+        # Detect whether videos have interactive actions (PKU only)
         video_is_interactive = (
             self.dataset == "PKU"
             and any(s.action_id in self.interactive_ids for s in segments)
         )
         n_expected = NUM_PERSONS if video_is_interactive else 1
 
-        # Tracker instance (dùng chung cho cả video, reset giữa các chunk)
+        # Tracker instance (common for the whole video, reset between chunks)
         tracker = get_person_tracker(self.cfg) if video_is_interactive else None
 
-        # Frame cache: {fid → list[PersonBox]}, sống xuyên suốt video
+        # Frame cache: {fid → list[PersonBox]}, live throughout the video
         frame_cache: dict[int, list[PersonBox]] = {}
-        # Set frame_id đã count vào stats (tránh double-count overlap)
+        # Set count frame_id to stats (avoid double-count overlap)
         counted_frames: set[int] = set()
 
         chunks = _build_chunks(segments, self.max_per_chunk)
@@ -241,12 +241,12 @@ class DetectionPipeline:
 
         for chunk_idx, chunk_segs in chunk_iterable:
             # ── Resume check ──
-            # Quét folder chunks: nếu file temp jsonl của chunk đã tồn tại thì coi như done
+            # Scan the chunks folder: if the temp jsonl file of the chunk already exists, it is considered done
             if self.saver.chunk_exists(video_name, chunk_idx):
-                # Chunk đã done → nạp lại vào frame_cache cho chunk sau
+                # Chunk done → reloaded into frame_cache for the next chunk
                 done_rows = self.saver.load_chunk_rows(video_name, chunk_idx)
                 frame_cache.update(DetectionSaver.rows_to_frame_cache(done_rows))
-                # Cũng update counted_frames để tránh double-count
+                # Also update counted_frames to avoid double-count
                 for row in done_rows:
                     fid = row["frame_id"]
                     if fid not in counted_frames:
@@ -264,10 +264,10 @@ class DetectionPipeline:
                                 stats.empty_frames.append(fid)
                 if logger:
                     logger.info(
-                        f"{video_name} chunk {chunk_idx}: đã done, bỏ qua")
+                        f"{video_name} chunk {chunk_idx}: done, skipped")
                 continue
 
-            # ── Reset tracker đầu mỗi chunk ──
+            # ── Reset tracker at the beginning of each chunk ──
             if tracker is not None:
                 tracker.reset()
 
@@ -277,7 +277,7 @@ class DetectionPipeline:
                 frame_cache, counted_frames,
                 tracker, fps, stats)
 
-            # ── Ghi output ──
+            # ── Write output ──
             self.saver.save_chunk_rows(video_name, chunk_idx, chunk_rows)
 
             if not chunk_ok:
@@ -297,7 +297,7 @@ class DetectionPipeline:
             })
             self.progress.mark_chunk_done(video_name, chunk_idx, len(chunks))
 
-        # ── Cuối video: merge → video jsonl ──
+        # ── End of video: merge → video jsonl ──
         self.saver.merge_to_video_jsonl(video_name, len(chunks))
         stats.finish()
         self.progress.mark_video_done(video_name)
@@ -309,7 +309,7 @@ class DetectionPipeline:
                       chunk_idx: int, frame_cache: dict[int, list[PersonBox]],
                       counted_frames: set[int], tracker,
                       fps: float, stats: DetectionVideoStats) -> tuple[list[dict], bool]:
-        """Detect tất cả frame trong chunk. Trả về (rows, chunk_ok)."""
+        """Detect all frames in the chunk. Returns (rows, chunk_ok)."""
         intervals = _union_intervals(chunk_segs)
         rows: list[dict] = []
         chunk_ok = True
@@ -330,7 +330,7 @@ class DetectionPipeline:
                     while len(batch_fids) < batch_size and curr_fid <= end:
                         read_ok, frame = cap.read()
                         if not read_ok:
-                            # Không đọc được frame → fail cứng
+                            # Unable to read frame → hard fail
                             self._count_frame(curr_fid, False, [], counted_frames, stats)
                             row = _make_row(curr_fid, fps, action_ids, chunk_idx,
                                             [], False, "no_detect")
@@ -347,16 +347,16 @@ class DetectionPipeline:
                     if not batch_fids:
                         continue
                         
-                    # 1. Chạy YOLO batch cho các frame chưa được cache
+                    # 1. Run YOLO batch for uncached frames
                     detect_frames = [frame for frame, is_cached in zip(batch_frames, batch_from_cache) if not is_cached]
                     batch_boxes = []
                     if detect_frames:
                         batch_boxes = self._get_yolo().detect_batch(detect_frames, batch_size=batch_size)
                         
-                    # 2. Xử lý tuần tự (Tracker, Retry, Stats)
+                    # 2. Sequential processing (Tracker, Retry, Stats)
                     b_idx = 0
                     for fid, frame, is_cached in zip(batch_fids, batch_frames, batch_from_cache):
-                        # Xác định số lượng người TỐI THIỂU phải tìm thấy
+                        # Determine the MINIMUM number of people to find
                         if self.dataset == "PKU" and any(aid in self.interactive_ids for aid in action_ids):
                             curr_n_expected = NUM_PERSONS
                         else:
@@ -367,7 +367,7 @@ class DetectionPipeline:
                         else:
                             initial_boxes = batch_boxes[b_idx]
                             b_idx += 1
-                            # Pass initial_boxes cho attempt 0, hàm sẽ tự retry nếu fail
+                            # Pass initial_boxes to attempt 0, function will auto-retry if fail
                             boxes = self._detect_with_retry(
                                 frame, initial_boxes, tracker, curr_n_expected, stats)
                             frame_cache[fid] = boxes
@@ -404,7 +404,7 @@ class DetectionPipeline:
                      valid_boxes: list[PersonBox],
                      counted_frames: set[int],
                      stats: DetectionVideoStats) -> None:
-        """Update stats cho frame, chỉ 1 lần (skip nếu đã counted)."""
+        """Update stats for frame, only once (skip if counted)."""
         if fid in counted_frames:
             return
         counted_frames.add(fid)
@@ -425,11 +425,11 @@ class DetectionPipeline:
                            initial_boxes: list[PersonBox] | None,
                            tracker, n_expected: int,
                            stats: DetectionVideoStats) -> list[PersonBox]:
-        """YOLO detect với retry. Trả về best boxes.
+        """YOLO detect with retry. Returns best boxes.
 
-        Attempt 0 (original): imgsz mặc định (dùng initial_boxes từ batch)
+        Attempt 0 (original): default imgsz (uses initial_boxes from batch)
         Retry 1: imgsz=imgsz_retry (1280) + augment=tta
-        Retry 2: preprocess ảnh (brightness / CLAHE) + imgsz mặc định
+        Retry 2: preprocess image (brightness / CLAHE) + default imgsz
         """
         best_boxes: list[PersonBox] = []
         best_valid_count = 0
@@ -443,7 +443,7 @@ class DetectionPipeline:
         if best_valid_count >= n_expected:
             return self._apply_tracker(best_boxes, frame, tracker, n_expected)
 
-        # Retry 1 — imgsz lớn hơn + TTA
+        # Retry 1 — larger imgsz + TTA
         if self.max_retries >= 1:
             retry_boxes1 = self._get_yolo().detect(
                 frame, imgsz=self.imgsz_retry, augment=self.tta)
@@ -453,7 +453,7 @@ class DetectionPipeline:
             if best_valid_count >= n_expected:
                 return self._apply_tracker(best_boxes, frame, tracker, n_expected)
 
-        # Retry 2 — preprocess ảnh
+        # Retry 2 — preprocess the image
         if self.max_retries >= 2:
             preproc = _apply_retry_preproc(
                 frame, self.brightness_delta, self.clahe_on_retry)
@@ -468,10 +468,10 @@ class DetectionPipeline:
                    cur_best: list[PersonBox],
                    cur_count: int,
                    cur_conf: float) -> tuple[list[PersonBox], int, float]:
-        """So sánh và giữ kết quả tốt hơn (nhiều valid box hơn, hoặc conf cao hơn)."""
+        """Compare and keep better results (more valid boxes, or higher conf)."""
         valid_new = [b for b in new_boxes if b.confidence >= self.conf_threshold]
         max_conf_new = max((b.confidence for b in valid_new), default=0.0)
-        # Ưu tiên: số valid box nhiều hơn; nếu bằng → conf cao hơn
+        # Priority: more valid boxes; if equal -> higher conf
         if (len(valid_new) > cur_count
                 or (len(valid_new) == cur_count and max_conf_new > cur_conf)):
             return new_boxes, len(valid_new), max_conf_new
@@ -480,7 +480,7 @@ class DetectionPipeline:
     def _apply_tracker(self, boxes: list[PersonBox],
                        frame: np.ndarray,
                        tracker, n_expected: int) -> list[PersonBox]:
-        """Áp dụng tracker (chỉ khi n_expected == 2). Trả về sorted/sliced boxes."""
+        """Apply tracker (only if n_expected == 2). Returns sorted/sliced ​​boxes."""
         if tracker is not None and boxes:
             return tracker.update(boxes, frame)[:NUM_PERSONS]
         return boxes[:n_expected]

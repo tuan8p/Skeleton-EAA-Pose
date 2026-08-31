@@ -1,4 +1,4 @@
-"""Tach skeleton cua cac chunk thanh file theo tung action cua video.
+"""Split skeleton chunks into per-action files for a video.
 
 Doc : output_dir/chunks/{npy,jsonl,meta}/<video>_chunk_NNN.*
 Ghi : output_dir/actions/{npy,jsonl}/<video>_NNN.*
@@ -20,14 +20,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def split_video(output_dir: Path, video_name: str) -> list[tuple[Path, int, int]]:
-    """Tra ve list (file_action, action_id, so_frame)."""
+    """Return list of (action_file, action_id, frame_count)."""
     chunk_npy_dir = output_dir / "chunks" / "npy"
     chunk_jsonl_dir = output_dir / "chunks" / "jsonl"
     chunk_meta_dir = output_dir / "chunks" / "meta"
     action_npy_dir = output_dir / "actions" / "npy"
     action_jsonl_dir = output_dir / "actions" / "jsonl"
 
-    # gom segments goc theo thu tu toan video (cac chunk theo thu tu)
+    # gather original segments in video order (chunks in sequence)
     segments: list[dict] = []
     chunk_data: list[dict] = []
     for meta_path in sorted(chunk_meta_dir.glob(f"{video_name}_chunk_*.json")):

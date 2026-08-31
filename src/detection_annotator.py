@@ -1,9 +1,8 @@
-"""Đọc annotation PKU/TSU cho pipeline detection độc lập.
-
-PKU : Label_PKUMMD/<video>.txt, mỗi dòng: action_id,start_frame,end_frame,confidence
-      KHÔNG có action 'nothing' — chỉ các action cụ thể trong từng dòng.
+"""Read action annotations for PKU/TSU.
+PKU : Label_PKUMMD/<video>.txt, each line: action_id,start_frame,end_frame,confidence
+      NO action 'nothing' - only specific actions in each line.
 TSU : annotation_dir/**/<video>.csv (event, start_frame, end_frame)
-      Chỉ xử lý các event có trong event_mapping.csv (53 events cố định).
+      Only processes events in event_mapping.csv (fixed 53 events).
       Path mapping: config key tsu.event_mapping_path
 """
 from __future__ import annotations
@@ -59,7 +58,7 @@ class TSUDetectionAnnotator:
         self.video_ext: str = cfg.get("tsu.video_ext", ".mp4")
         mapping_path = Path(cfg.get("tsu.event_mapping_path", "event_mapping.csv"))
         self._event_map: dict[str, int] = self._load_mapping(mapping_path)
-        # Column config: string name nếu has_header=True, index nếu False
+        # Column config: string name if has_header=True, index if False
         self.has_header: bool = bool(cfg.get("tsu.has_header", True))
         self.event_col = cfg.get("tsu.event_column", "event")
         self.start_col = cfg.get("tsu.start_column", "start_frame")
@@ -69,7 +68,7 @@ class TSUDetectionAnnotator:
     def _load_mapping(path: Path) -> dict[str, int]:
         """Load event_mapping.csv (columns: id, event_name) → {event_name: id}.
 
-        Dùng utf-8-sig để tự động strip BOM (\ufeff) — Windows Excel thường thêm BOM.
+        Use utf-8-sig to automatically strip BOM (\ufeff) - Windows Excel often adds BOM.
         """
         mapping: dict[str, int] = {}
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
@@ -93,7 +92,7 @@ class TSUDetectionAnnotator:
         with open(matches[0], "r", encoding="utf-8", newline="") as f:
             if self.has_header:
                 reader = csv.DictReader(f)
-                # Hỗ trợ cả tên cột (string) lẫn index (int)
+                # Supports both column names (string) and index (int)
                 event_key = (self.event_col if isinstance(self.event_col, str)
                              else None)
                 start_key = (self.start_col if isinstance(self.start_col, str)
@@ -123,7 +122,7 @@ class TSUDetectionAnnotator:
                         dataset="TSU",
                     ))
             else:
-                # No header: đọc theo index
+                # No header: read by index
                 reader_raw = csv.reader(f)
                 for row in reader_raw:
                     if len(row) < 3:
@@ -158,4 +157,4 @@ def get_detection_annotator(cfg: ConfigManager):
         return PKUDetectionAnnotator(cfg)
     if dataset == "TSU":
         return TSUDetectionAnnotator(cfg)
-    raise ValueError(f"Dataset không hỗ trợ: {dataset}")
+    raise ValueError(f"Unsupported dataset: {dataset}")

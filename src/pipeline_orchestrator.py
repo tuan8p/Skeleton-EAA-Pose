@@ -1,15 +1,13 @@
-"""Dieu phoi pipeline (PLAN + cac cap nhat):
+"""Pipeline orchestrator (design notes):
 
-- Overlap: vung giao giua 2 action extract DUNG 1 LAN, luu buffer dung chung;
-  action sau tiep tuc tu frame sau vung giao. Moi action giu nguyen [start, end].
-- Moi frame deu qua YOLO26n (detect person) -> crop -> BlazePose. Chi 8 action
-  tuong tac PKU bat DeepOCSORT (2 person); con lai top-1 box (single person).
-- Temporal Logic: frame trong ngan giua 2 frame conf cao -> FN (retry detect toi
-  da 2 lan, van trong -> noi suy bbox theo thoi gian -> BlazePose lai);
-  chuoi trong >= `temporal.empty_run_frames` -> TN: skeleton = 0, KHONG loi.
-- ok_frames: frame du joints SAU retry + noi suy (TN luon ok; tuong tac: du 2).
-- Depth (tuy chon): ghost legs masking truoc BlazePose + back-projection 3D
-  goc camera (output.coordinate_mode: "camera").
+- Overlap: intersection between 2 actions is extracted ONCE, stored in shared buffer;
+  subsequent action continues from frame after intersection. Each action keeps its [start, end].
+- Every frame passes through YOLO (person detect) -> crop -> BlazePose. Only 8 interactive
+  PKU actions use DeepOCSORT (2 person); others use top-1 box (single person).
+- Temporal Logic: short empty gap between 2 high-conf frames -> FN (retry detect up to
+  2 times, still empty -> interpolate bbox temporally -> BlazePose again);
+  run of >= `temporal.empty_run_frames` empty frames -> TN: skeleton = 0, NOT an error.
+- ok_frames: frames with sufficient joints AFTER retry + interpolation (TN always ok; interactive: must have 2).
 """
 from __future__ import annotations
 
@@ -22,7 +20,6 @@ import threading
 from .action_segment import ActionSegment
 from .annotation_reader import get_annotation_reader
 from .config_manager import ConfigManager
-from .depth_processor import DepthProcessor
 from .image_preprocessor import ImagePreprocessor
 from .logger import PipelineLogger, VideoStats
 from .mapper import Mapper, NUM_NTU_JOINTS
@@ -39,14 +36,14 @@ NUM_PERSONS = 2
 
 
 class _FrameDetect:
-    """Ket qua detect 1 frame o pha 1."""
+    """Detection result for 1 frame in phase 1."""
     __slots__ = ("fid", "boxes", "interpolated", "is_tn")
 
     def __init__(self, fid: int, boxes: list[PersonBox]):
         self.fid = fid
         self.boxes = boxes
-        self.interpolated = False   # bbox duoc noi suy thoi gian (FN)
-        self.is_tn = False          # thuc su khong co nguoi (TN)
+        self.interpolated = False   # bbox was temporally interpolated (FN)
+        self.is_tn = False          # truly no person present (TN)
 
 
 class PipelineOrchestrator:
@@ -64,7 +61,6 @@ class PipelineOrchestrator:
         self.interpolator = SkeletonInterpolator(self.cfg)
         self.scaler = SkeletonScaler(self.cfg)
         self.saver = SkeletonSaver(self.cfg)
-        self.depth = DepthProcessor(self.cfg)
         self.detection_dir = Path(self.cfg.get("detection.output_dir", "outputs_detect"))
         output_dir = Path(self.cfg.get("paths.output_dir"))
         self.progress = ProgressManager(output_dir / "progress.json")
@@ -96,12 +92,12 @@ class PipelineOrchestrator:
         logger = PipelineLogger(self.cfg, start, end)
         for video_name in videos[start:end]:
             if self.progress.is_video_done(video_name):
-                logger.info(f"Bo qua {video_name} (da xu ly xong)")
+                logger.info(f"Skipping {video_name} (already processed)")
                 continue
             stats = self.process_video(video_name)
             logger.write_video_log(stats, self.cfg.as_dict())
             logger.append_batch_summary(stats)
-            logger.info(f"Xong {video_name}: ok={stats.ok_frames}/{stats.total_frames}, "
+            logger.info(f"Done {video_name}: ok={stats.ok_frames}/{stats.total_frames}, "
                         f"video_ok={stats.video_ok}")
         self.close()
 
@@ -111,18 +107,12 @@ class PipelineOrchestrator:
         if self.max_segments:
             segments = segments[: int(self.max_segments)]
         video_path = segments[0].video_path if segments else ""
-        has_depth = self.depth.open(video_name)
-        if self.coord_mode == "camera" and not has_depth:
-            import logging
-            logging.getLogger("pipeline").warning(
-                f"{video_name}: coordinate_mode=camera nhung khong co depth -> "
-                "fallback BlazePose world")
         
         segs = sorted(segments, key=lambda s: s.start_frame)
         intervals = self._union_intervals(segs)
         
         skeleton, meta_rows, fps = self._process_chunk(
-            video_name, video_path, intervals, stats, has_depth)
+            video_name, video_path, intervals, stats)
         
         skeleton, filled = self.interpolator.interpolate(skeleton)
         stats.interpolated_frames.extend(
@@ -140,7 +130,6 @@ class PipelineOrchestrator:
         self.saver.save_video(video_name, skeleton, meta_rows)
         
         stats.finish()
-        self.depth.close()
         self.progress.mark_video_done(video_name)
         return stats
 
@@ -148,14 +137,13 @@ class PipelineOrchestrator:
         close = getattr(self.pose, "close", None)
         if callable(close):
             close()
-        self.depth.close()
 
     @staticmethod
     def _union_intervals(segs: list[ActionSegment]) -> list[tuple[int, int, list[int]]]:
-        """Hop nhat cac [start,end] chong nhau -> list (start, end, [action_ids]).
+        """Merge overlapping [start,end] intervals -> list (start, end, [action_ids]).
 
-        Vung giao mang label list; moi frame chi xuat hien 1 lan (extract 1 lan,
-        dung chung cho cac action phu).
+        Intersection carries label list; each frame appears only once (extracted once,
+        shared across secondary actions).
         """
         events: list[tuple[int, int, int]] = []  # (pos, +1/-1, action_id)
         for s in segs:
@@ -175,7 +163,7 @@ class PipelineOrchestrator:
             prev = pos
         return intervals
 
-    # ---------------- pha 1: detect + temporal FN/TN ----------------
+    # ---------------- phase 1: detect + temporal FN/TN ----------------
     def _detect_pass(self, video_name: str, video_path: str, intervals, stats: VideoStats,
                      label_is_interactive: list[bool]) -> list[_FrameDetect]:
         import json
@@ -191,7 +179,7 @@ class PipelineOrchestrator:
                         pass
         else:
             import logging
-            logging.getLogger("pipeline").warning(f"Khong tim thay file JSONL detect: {jsonl_path}")
+            logging.getLogger("pipeline").warning(f"Detection JSONL not found: {jsonl_path}")
 
         detects: list[_FrameDetect] = []
         for (start, end, _ids), interactive in zip(intervals, label_is_interactive):
@@ -216,8 +204,8 @@ class PipelineOrchestrator:
         return detects
 
     def _classify_empty_runs(self, detects: list[_FrameDetect], stats: VideoStats) -> None:
-        """Chuoi trong >= empty_run -> TN; chuoi ngan giua 2 lan can conf cao -> FN
-        (noi suy bbox thoi gian)."""
+        """Run of >= empty_run empty frames -> TN; short gap between 2 high-conf frames -> FN
+        (temporally interpolate bbox)."""
         n = len(detects)
         t = 0
         while t < n:
@@ -227,7 +215,7 @@ class PipelineOrchestrator:
             s = t
             while t < n and not detects[t].boxes:
                 t += 1
-            e = t - 1  # chuoi trong [s..e]
+            e = t - 1  # empty run [s..e]
             length = e - s + 1
             if length >= self.empty_run:
                 for i in range(s, e + 1):
@@ -240,11 +228,11 @@ class PipelineOrchestrator:
                 for i in range(s, e + 1):
                     stats.fn_frames.append(detects[i].fid)
                 self._interpolate_bboxes(detects, s, e)
-            # chuoi ngan khong co lan can tot -> de nguyen (loi no_detect luc pose)
+            # short run with no good neighbors -> leave as-is (ERR_NO_DETECT at pose stage)
 
     @staticmethod
     def _interpolate_bboxes(detects: list[_FrameDetect], s: int, e: int) -> None:
-        """Noi suy tuyen tinh bbox giua frame truoc va sau chuoi trong (theo slot)."""
+        """Linearly interpolate bbox between previous and next frames around empty run (per slot)."""
         prev_boxes = detects[s - 1].boxes if s > 0 else []
         next_boxes = detects[e + 1].boxes if e + 1 < len(detects) else []
         n_slots = max(len(prev_boxes), len(next_boxes))
@@ -268,10 +256,10 @@ class PipelineOrchestrator:
             detects[i].boxes = boxes
             detects[i].interpolated = True
 
-    # ---------------- pha 2: pose per frame ----------------
+    # ---------------- phase 2: pose per frame ----------------
     def _process_chunk(self, video_name: str, video_path: str,
                        intervals: list[tuple[int, int, list[int]]],
-                       stats: VideoStats, has_depth: bool):
+                       stats: VideoStats):
         label_is_interactive = [any(a in self.interactive_ids for a in ids)
                                 for _, _, ids in intervals]
         detects = self._detect_pass(video_name, video_path, intervals, stats, label_is_interactive)
@@ -296,13 +284,8 @@ class PipelineOrchestrator:
                         fid += 1
                     break
                 det = detects[t]
-                depth_map = None
-                if has_depth:
-                    raw = self.depth.read(fid, to_meters=(self.coord_mode == "camera"))
-                    if raw is not None:
-                        depth_map = self.depth.align(raw, (frame.shape[1], frame.shape[0]))
                 skel[t], meta = self._process_frame(
-                    video_name, frame, det, fid, fps, ids, interactive, stats, depth_map)
+                    video_name, frame, det, fid, fps, ids, interactive, stats)
                 meta_rows.append(meta)
                 t += 1
         cap.release()
@@ -310,15 +293,15 @@ class PipelineOrchestrator:
 
     def _process_frame(self, video_name: str, frame: np.ndarray, det: _FrameDetect,
                        fid: int, fps: float, action_ids: list[int], interactive: bool,
-                       stats: VideoStats, depth_map: np.ndarray | None):
+                       stats: VideoStats):
         stats.total_frames += 1
         if det.is_tn:
             skel = np.zeros((NUM_PERSONS, NUM_NTU_JOINTS, 3), dtype=np.float32)
             return skel, self._meta_row(fid, fps, action_ids, {"no_person": True},
                                         None, None, None)
-        # FN: su dung truc tiep bbox tu JSONL, hoac da duoc bbox interpolation, KHONG retry YOLO
+        # FN: use bbox directly from JSONL (or temporally interpolated), do NOT retry YOLO
         skel, err, extra, lm2d, confs, retries, vis_list = self._pose_frame(
-            frame, det, interactive, stats, depth_map)
+            frame, det, interactive, stats)
         stats.retry_count += retries
         flags: dict = dict(extra)
         if det.interpolated:
@@ -339,12 +322,12 @@ class PipelineOrchestrator:
                                     bbox_rows, joint_conf)
 
     def _pose_frame(self, frame: np.ndarray, det: _FrameDetect, interactive: bool,
-                    stats: VideoStats, depth_map: np.ndarray | None):
-        """Chay BlazePose tren crop tung person (top-1 hoac 2 slot tracked)."""
+                    stats: VideoStats):
+        """Run BlazePose on cropped region per person (top-1 or 2 tracked slots)."""
         n_expected = NUM_PERSONS if interactive else 1
         skel = np.full((NUM_PERSONS, NUM_NTU_JOINTS, 3), np.nan, dtype=np.float32)
         if not interactive:
-            skel[1] = 0.0  # single person: person 2 vang -> 0
+            skel[1] = 0.0  # single person: person 2 absent -> 0
         retries = 0
         vis_list: list = [None] * NUM_PERSONS
         if not det.boxes:
@@ -362,10 +345,6 @@ class PipelineOrchestrator:
             if crop.size == 0:
                 person_errors.append(ERR_NO_DETECT)
                 continue
-            if depth_map is not None:
-                masked = self.depth.mask_obstruction(frame, [box.xyxy], depth_map)
-                if masked is not frame:
-                    crop, _ = box.crop(masked)
             res, tfm, r = self._extract_with_retry(crop)
             retries += r
             if res is None:
@@ -373,8 +352,7 @@ class PipelineOrchestrator:
                 person_errors.append(ERR_NO_DETECT)
                 continue
             skel, err, flags_p, lm2d_p, confs_p, vis25 = self._validate_person(
-                res, tfm, frame, (x0, y0), (crop.shape[1], crop.shape[0]), skel, p,
-                depth_map)
+                res, tfm, frame, (x0, y0), (crop.shape[1], crop.shape[0]), skel, p)
             vis_list[p] = vis25
             if err is None:
                 confs.extend(confs_p)
@@ -393,12 +371,11 @@ class PipelineOrchestrator:
 
     def _validate_person(self, res: PoseResult, tfm, frame: np.ndarray,
                          crop_offset: tuple[int, int], crop_wh: tuple[int, int] | None,
-                         skel: np.ndarray, person_idx: int,
-                         depth_map: np.ndarray | None):
-        """Map 33->25, validate 1 person. Tra ve (skel, err|None, flags, lm2d, confs, vis25)."""
+                         skel: np.ndarray, person_idx: int):
+        """Map 33->25, validate 1 person. Returns (skel, err|None, flags, lm2d, confs, vis25)."""
         vis25 = Mapper.map_visibility(res.visibility)
         lm2d = self._map_2d(res, tfm, frame.shape[:2], crop_offset, crop_wh)
-        skel25 = self._to_output_coords(res, lm2d, frame.shape[:2], depth_map)
+        skel25 = self._to_output_coords(res)
         if self.validator.all_low_conf(vis25):
             return skel, ERR_LOW_CONF, {}, lm2d if self.save_2d else None, [], vis25
         val = self.validator.finalize(skel25, vis25)
@@ -410,20 +387,14 @@ class PipelineOrchestrator:
         flags = {"nan_joints": val.nan_joints} if val.nan_joints else {}
         return skel, None, flags, lm2d if self.save_2d else None, [conf], vis25
 
-    def _to_output_coords(self, res: PoseResult, lm2d: np.ndarray,
-                          frame_hw: tuple[int, int],
-                          depth_map: np.ndarray | None) -> np.ndarray:
-        """Chon he toa do output: camera (depth back-projection) | world | image."""
-        if self.coord_mode == "camera" and depth_map is not None:
-            fh, fw = frame_hw
-            lm2d_px = lm2d * np.array([fw, fh], dtype=np.float32)
-            return self.depth.backproject(lm2d_px, depth_map)
+    def _to_output_coords(self, res: PoseResult) -> np.ndarray:
+        """Select output coordinate system: world | image."""
         src = res.world_landmarks if self.coord_mode in ("world", "camera") \
             else res.image_landmarks
         return Mapper.map_coords(src)
 
     def _evaluate_chunk(self, skeleton: np.ndarray, intervals, meta_rows) -> list[bool]:
-        """Frame ok = khong con NaN (sau noi suy) tren person ky vong; TN luon ok."""
+        """Frame ok = no remaining NaN (after interpolation) on expected persons; TN always ok."""
         oks: list[bool] = []
         t = 0
         for start, end, ids in intervals:
@@ -431,7 +402,7 @@ class PipelineOrchestrator:
             for _ in range(start, end + 1):
                 row = meta_rows[t]
                 if row["error_flags"].get("no_person"):
-                    oks.append(True)  # TN: khong loi
+                    oks.append(True)  # TN: not an error
                 else:
                     oks.append(bool(not np.isnan(skeleton[t, :expected]).any()))
                 t += 1
@@ -439,7 +410,7 @@ class PipelineOrchestrator:
 
     # ---------------- helpers ----------------
     def _attempts(self, frame: np.ndarray):
-        """Cac bien the anh de thu: [raw, retry1, retry2] theo thu tu."""
+        """Image variants to attempt: [raw, retry1, retry2] in order."""
         h0, w0 = frame.shape[:2]
         yield frame, (1.0, 0, 0, w0, h0)
         if self.max_retries >= 1:
@@ -448,7 +419,7 @@ class PipelineOrchestrator:
             yield self.preprocessor.process_retry2(frame)
 
     def _extract_with_retry(self, frame: np.ndarray):
-        """Tra ve (PoseResult|None, transform, so_lan_retry)."""
+        """Returns (PoseResult|None, transform, retry_count)."""
         h0, w0 = frame.shape[:2]
         result, best_tfm, retries = None, (1.0, 0, 0, w0, h0), 0
         for img, tfm in self._attempts(frame):
@@ -464,7 +435,7 @@ class PipelineOrchestrator:
     def _map_2d(self, res: PoseResult, tfm, frame_hw: tuple[int, int],
                 crop_offset: tuple[int, int],
                 crop_wh: tuple[int, int] | None) -> np.ndarray:
-        """Landmarks 2D normalized theo frame goc (bun letterbox + crop offset)."""
+        """2D landmarks normalized to original frame (accounting for letterbox + crop offset)."""
         fh, fw = frame_hw
         lm2d = Mapper.map_coords(res.image_landmarks)[:, :2]
         if crop_wh is not None:

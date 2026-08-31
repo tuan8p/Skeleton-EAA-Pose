@@ -1,10 +1,12 @@
 import os
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import json
 from pathlib import Path
 
 # Add project root to sys.path to import src modules
-sys.path.insert(0, 'D:/Downloads/ĐATN/Skeleton-EAA-Pose')
+sys.path.insert(0, 'D:/Downloads/DATN/Skeleton-EAA-Pose')
 from src.config_manager import ConfigManager
 from src.annotation_reader import get_annotation_reader
 
@@ -20,7 +22,7 @@ def verify_dataset(dataset_name, cfg):
         if not segments:
             continue
             
-        # Lấy danh sách các frame_id cần thiết (hợp của tất cả các segment)
+        # Get list of required frame_ids (union of all segments)
         expected_frames = set()
         for seg in segments:
             for f in range(seg.start_frame, seg.end_frame + 1):
@@ -31,7 +33,7 @@ def verify_dataset(dataset_name, cfg):
             missing_or_incomplete.append(video_name)
             continue
             
-        # Đọc các frame_id thực tế có trong file JSONL
+        # Read actual frame_ids present in the JSONL file
         actual_frames = set()
         try:
             with open(jsonl_path, "r", encoding="utf-8") as f:
@@ -47,7 +49,7 @@ def verify_dataset(dataset_name, cfg):
             missing_or_incomplete.append(video_name)
             continue
             
-        # Kiểm tra xem có frame nào nằm trong Annotation mà ko có trong jsonl ko
+        # Check if any frame in Annotation is missing from jsonl
         missing_frames = expected_frames - actual_frames
         if missing_frames:
             missing_or_incomplete.append(video_name)
@@ -57,7 +59,7 @@ def verify_dataset(dataset_name, cfg):
 def main():
     cfg = ConfigManager('D:/Downloads/ĐATN/Skeleton-EAA-Pose/config.yaml')
     
-    # 1. Rà soát PKU
+    # 1. Review PKU
     cfg.set('dataset', 'PKU')
     cfg.set('paths.video_dir', 'D:/Downloads/ĐATN/PKU-MMD/Data_PKUMMD')
     cfg.set('paths.annotation_dir', 'D:/Downloads/ĐATN/PKU-MMD/Label_PKUMMD')
@@ -66,24 +68,24 @@ def main():
     print("Verifying PKU...")
     pku_missing = verify_dataset('PKU', cfg)
     
-    # 2. Rà soát TSU
+    # 2. Review TSU
     cfg.set('dataset', 'TSU')
     cfg.set('paths.video_dir', 'D:/Downloads/ĐATN') 
-    cfg.set('paths.annotation_dir', 'D:/Downloads/ĐATN/Annotation_v1.0')
+    cfg.set('paths.annotation_dir', 'D:/Downloads/DATN/Annotation_v1.0')
     cfg.set('tsu.event_map', None) 
     
     print("Verifying TSU...")
     tsu_missing = verify_dataset('TSU', cfg)
     
-    # Gộp và in ra kết quả
+    # Combine and print the results
     all_missing = pku_missing + tsu_missing
     
     if all_missing:
-        print("\nDanh sách các video bị thiếu chunk hoặc thiếu frame detected:")
+        print("\nList of videos with missing chunks or missing frames detected:")
         output_list = [f'"{name}"' for name in all_missing]
         print(", ".join(output_list))
     else:
-        print("\nTất cả các video đều đầy đủ frame detected!")
+        print("\nAll videos have complete detected frames!")
 
 if __name__ == "__main__":
     main()

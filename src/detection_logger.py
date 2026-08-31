@@ -1,10 +1,10 @@
-"""Logger và VideoStats cho pipeline detection độc lập.
+"""Logger and VideoStats for independent pipeline detection.
 
-Tracking metrics thuần detection (không có skeleton):
-- ok_frames: frame có đủ bbox >= conf_threshold
-- fail_frames: frame không đủ bbox sau retry
-- empty_frames: subset fail_frames, YOLO trả về 0 bbox
-- retry_count: tổng số lần retry (tối đa 2/frame)
+Tracking metrics pure detection (no skeleton):
+- ok_frames: frames with enough bbox >= conf_threshold
+- fail_frames: frames without enough bbox after retry
+- empty_frames: subset of fail_frames, YOLO returned 0 bbox
+- retry_count: total retry count (max 2/frame)
 """
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ class DetectionVideoStats:
         self.video_name = video_name
         self.t_start = time.time()
         self.t_end: float | None = None
-        self.total_frames: int = 0          # tổng unique frame xử lý (theo annotation)
-        self.ok_frames: int = 0             # frame có đủ n_expected bbox >= threshold
+        self.total_frames: int = 0          # total unique frames processed (per annotation)
+        self.ok_frames: int = 0             # frame has enough n_expected bbox >= threshold
         self.fail_frames: list[int] = []    # frame_id fail sau retry
-        self.empty_frames: list[int] = []   # subset fail: YOLO trả 0 bbox
+        self.empty_frames: list[int] = []   # subset fail: YOLO returns 0 bbox
         self.retry_count: int = 0
-        self.detect_confs: list[float] = [] # max conf mỗi frame thành công
+        self.detect_confs: list[float] = [] # max conf for each successful frame
         self.video_fps: float = 0.0
         self.chunk_stats: list[dict] = []   # [{chunk_idx, total, fail, ok}, ...]
 

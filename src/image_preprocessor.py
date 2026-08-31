@@ -1,4 +1,4 @@
-"""Preprocessing anh theo config: resize (letterbox), CLAHE, gamma, denoise.
+"""Image preprocessing according to config: resize (letterbox), CLAHE, gamma, denoise.
 
 process() tra ve (frame_da_xu_ly, transform) voi transform = (scale, pad_x, pad_y)
 de anh xa toa do 2D normalized tu anh da resize ve frame goc:
@@ -57,7 +57,7 @@ class ImagePreprocessor:
     @staticmethod
     def to_original_coords(norm_xy: np.ndarray, orig_wh: tuple[int, int],
                            transform: tuple[float, int, int, int, int]) -> np.ndarray:
-        """Anh xa toa do normalized tren anh da preprocess ve normalized tren frame goc."""
+        """Map normalized coordinates from preprocessed image back to original frame coordinates."""
         scale, pad_x, pad_y, out_w, out_h = transform
         w0, h0 = orig_wh
         xy = norm_xy.copy()

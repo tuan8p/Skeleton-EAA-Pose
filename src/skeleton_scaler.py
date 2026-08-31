@@ -1,11 +1,11 @@
-"""Chuan hoa ty le (scaling): dua toa do ve bat bien voi khoang cach camera.
+"""Skeleton scaling: normalize coordinates to be invariant to camera distance.
 
-Cong thuc theo dataset-processing (scale_by_spine), nhung GIU NGUYEN 25 khop
-(khong bo SpineShoulder):
-    scale_person = mean_t( |SpineMid_t - SpineBase_t| )   (hang so theo person)
+Formula follows dataset-processing (scale_by_spine) but KEEPS all 25 joints
+(does not remove SpineShoulder):
+    scale_person = mean_t( |SpineMid_t - SpineBase_t| )   (constant per person)
     skel /= scale_person
-Frame co NaN / person vang (toan 0) khong tham gia tinh mean va khong bi anh
-huong (NaN/scale van NaN, 0/scale van 0).
+Frames with NaN / absent person (all-zero) do not participate in mean calculation and are not
+affected (NaN/scale stays NaN, 0/scale stays 0).
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class SkeletonScaler:
         self.spine_idx = int(cfg.get("scaling.spine_idx", 1))  # SpineMid
 
     def scale(self, skel: np.ndarray) -> np.ndarray:
-        """skel (T, P, J, 3) -> ban sao da scale theo tung person."""
+        """skel (T, P, J, 3) -> scaled copy per person."""
         if not self.enabled:
             return skel
         out = skel.astype(np.float32, copy=True)

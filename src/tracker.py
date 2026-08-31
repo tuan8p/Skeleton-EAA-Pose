@@ -1,8 +1,8 @@
-"""Gan ID nhat quan cho toi da 2 person qua cac frame (video 2 nguoi PKU).
+"""Assign consistent IDs to up to 2 persons across frames (PKU 2-person video).
 
-Ho tro 2 che do (config yolo.tracker):
-- "iou":        match theo IoU voi frame truoc (mac dinh, khong can them thu vien)
-- "deepocsort": DeepOCSORT (boxmot) + ReID; fallback IoU neu khong load duoc
+Supports 2 modes (config yolo.tracker):
+- "iou":        match by IoU with previous frame (default, no extra library needed)
+- "deepocsort": DeepOCSORT (boxmot) + ReID; falls back to IoU if not loadable
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class BasePersonTracker:
         ...
 
     def update(self, boxes: list[PersonBox], frame: np.ndarray) -> list[PersonBox]:
-        """Tra ve boxes da gan track_id, sap xep theo slot person on dinh."""
+        """Return boxes with track_id assigned, sorted into stable person slots."""
         raise NotImplementedError
 
 
@@ -32,7 +32,7 @@ class IoUTracker(BasePersonTracker):
         if not boxes:
             return []
         if not self._prev:
-            # Khung hinh dau tien: sap xep tu trai sang phai (Left to Right)
+            # First frame: sort left to right
             ordered = sorted(boxes, key=lambda b: b.xyxy[0])
             self._prev = ordered
             return ordered

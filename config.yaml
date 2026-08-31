@@ -1,10 +1,7 @@
-# Cau hinh pipeline trich xuat skeleton (Skeleton-EAA-Pose)
-# Notebook Colab co the ghi de bat ky tham so nao truoc khi chay.
-
 dataset: PKU            # PKU | TSU
 
 mediapipe:
-  model_path: "models/pose_landmarker_full.task"   # Tasks API (lite/full/heavy)
+  model_path: "models/pose_landmarker_heavy.task"   # Tasks API (lite/full/heavy)
   num_poses: 1
   min_detection_confidence: 0.5
   min_presence_confidence: 0.5
@@ -12,27 +9,12 @@ mediapipe:
   static_image_mode: false
 
 yolo:
-  model_name: "yolov8n.pt"    # Ultralytics YOLOv8 nano (CPU-friendly)
+  model_name: "yolov26x.pt"
   batch_size: 16
   conf_threshold: 0.2
   iou_threshold: 0.7
   max_detections: 2
-  tracker: "iou"       # deepocsort (boxmot) | iou (fallback thu cong)
-
-depth:
-  enabled: false             # bat khi co file depth cho video
-  gray_to_m: 0.256           # PKU depth avi: gray = byte cao cua mm -> m = gray*0.256
-                             # TSU: depth mp4 gray 8-bit tuong doi (khong met that)
-  scale_to_rgb: true         # resize depth ve kich thuoc RGB (align don gian)
-  masking:
-    enabled: true            # ghost legs masking (auto: chi khi phat hien vat can)
-    min_delta: 15            # nguong "gan hon nguoi" theo thang gia tri depth
-    fill_color: [128, 128, 128]
-  intrinsics:                # camera RGB (dung cho back-projection 3D)
-    fx: 1059.29
-    fy: 1059.32
-    cx: 962.90
-    cy: 543.40
+  tracker: "iou"
 
 preprocessing:
   resize:
@@ -97,24 +79,39 @@ output:
   save_2d_in_jsonl: true     # luu landmarks 2D normalized vao jsonl cho demo overlay
 
 paths:
-  video_dir: "/content/drive/MyDrive/videos"
-  output_dir: "/content/drive/MyDrive/skeletons"
-  log_dir: "/content/drive/MyDrive/logs"
-  failed_frames_dir: "/content/drive/MyDrive/failed_frames"
-  annotation_dir: "/content/drive/MyDrive/annotations"
-  depth_dir: ""              # PKU: <video>-depth.avi ; TSU: <video>-depth.mp4
+  video_dir: "D:/Downloads/ĐATN/RGB_PKUMMDv1"
+  output_dir: "D:/Downloads/ĐATN/outputs_pose"
+  log_dir: "logs"
+  failed_frames_dir: "failed_frames"
+  annotation_dir: "D:/Downloads/ĐATN/PKU-MMD/Label_PKUMMD"
 
 runtime:
-  num_workers: 1             # Thiet lap > 1 de chay song song nhieu video (luu y VRAM)
+  num_workers: 10             # Thiet lap > 1 de chay song song nhieu video (luu y VRAM)
   max_segments_per_video: null   # null = full; dat so nho de test nhanh tren CPU
   max_chunks_per_video: null     # null = full; gioi han so chunk xu ly tren moi video
   log_level: "INFO"
 
 detection:
-  output_dir: "/content/drive/MyDrive/outputs_detect"  # root chua PKU/ va TSU/
+  output_dir: "D:/Downloads/ĐATN/outputs_detection"  # root chua PKU/ va TSU/
   retry:
     max_retries: 2
     imgsz_retry: 1280        # imgsz khi retry 1 (mac dinh YOLO 640)
     tta: true               # Test Time Augmentation khi retry 1
     brightness_delta: 30     # tang sang khi retry 2 (0 = tat)
     clahe_on_retry: true    # bat CLAHE khi retry 2
+
+compare_paths:
+  gt_dir: "D:/Downloads/ĐATN/PKU-MMD/Skeleton"
+  ext_dir: "D:/Downloads/ĐATN/outputs_pose/PKU"
+  output_dir: "outputs/compare_results"
+
+alignment:
+  align_root: true      # Set to true to translate the root joint (SpineBase) to (0,0,0) before comparison
+  root_joint_idx: 0     # 0 is SpineBase in NTU 25-joint format
+
+matching:
+  match_by_distance: true # Set to true to automatically match Person 1 & Person 2 between GT and Extracted to minimize distance
+
+visualization:
+  plot_per_joint_mpjpe: true
+  plot_time_series: true

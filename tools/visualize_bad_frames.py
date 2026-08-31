@@ -1,9 +1,9 @@
-"""Visualize kiem chung pipeline — THEO CHUNK (khong lan giua cac chunk).
+"""Pipeline diagnostic visualization — PER CHUNK (no cross-chunk mixing).
 
 Voi moi chunk co frame khong ok (ok=false):
   failed_frames/<video>/chunk_NNN/
     <video>_chunk_NNN.mp4   # video cat vung chunk [min_start..max_end], ve day du
-                            # bbox + bbox conf + skeleton + joint conf len moi frame
+                            # draw bbox + bbox conf + skeleton + joint conf onto each frame
     frame_XXXXXX.jpg        # anh tung frame khong ok cua chunk do
 
 Quy tac ve anh frame fail:
@@ -43,7 +43,7 @@ def _draw_boxes(frame: np.ndarray, bboxes: list, conf_th: float) -> None:
 
 
 def _draw_skeleton(frame: np.ndarray, lm2d, joint_conf, conf_th: float) -> None:
-    """Ve skeleton; joint yeu (conf < threshold) ve mau do + ghi conf."""
+    """Draw skeleton; weak joints (conf < threshold) drawn in red + annotated with conf."""
     h, w = frame.shape[:2]
     persons_lm = lm2d if isinstance(lm2d[0][0], list) else [lm2d]
     persons_cf = joint_conf if joint_conf else [None] * len(persons_lm)

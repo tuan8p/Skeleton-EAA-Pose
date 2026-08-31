@@ -1,4 +1,4 @@
-"""(Tuy chon) Gop cac chunk .npy/.jsonl cua 1 video thanh 1 file duy nhat.
+"""(Optional) Merge chunk .npy/.jsonl files for a single video into one file.
 
 Vi du:
     python scripts/merge_actions.py --output-dir out/skeletons --video 0002-L

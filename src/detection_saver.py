@@ -1,17 +1,17 @@
-"""Lưu output pipeline detection: per-chunk temp jsonl, visualize video, video jsonl.
+"""Save output pipeline detection: per-chunk temp jsonl, visualize video, video jsonl.
 
 Layout output:
     {detection.output_dir}/{DATASET}/
         bboxes/
             jsonl/<video>.jsonl          # final per-video (sau khi merge chunks)
-            chunks/<video>_chunk_NNN.jsonl  # temp per-chunk (dùng cho resume + merge)
+            chunks/<video>_chunk_NNN.jsonl  # temp per-chunk (for resume + merge)
             progress.json
         failed_frames/<video>/chunk_NNN/
-            <video>_chunk_NNN.mp4        # video visualize chunk (chỉ khi chunk fail)
-            frame_XXXXXX.jpg             # ảnh tĩnh từng frame fail
-        logs/                            # xử lý bởi DetectionLogger
+            <video>_chunk_NNN.mp4        # video visualize chunk (only if chunk fail)
+            frame_XXXXXX.jpg             # static image for each failed frame
+        logs/                            # handled by DetectionLogger
 
-Bbox trong output: tọa độ frame GỐC (YOLO Ultralytics tự trả về coord gốc).
+Bbox in output: ORIGINAL frame coordinates (YOLO Ultralytics automatically returns the original coord).
 """
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ import numpy as np
 from .config_manager import ConfigManager
 from .yolo_detector import PersonBox
 
-_OK_COLOR = (0, 200, 0)      # xanh lá — bbox ok
-_FAIL_COLOR = (0, 0, 220)    # đỏ — bbox fail / no detect
+_OK_COLOR = (0, 200, 0)      # green — bbox ok
+_FAIL_COLOR = (0, 0, 220)    # red — bbox failed / no detect
 _LOW_COLOR = (0, 140, 255)   # cam — bbox low conf
 
 
@@ -36,7 +36,7 @@ class DetectionSaver:
         ds = dataset.upper()
         self.bboxes_dir = detect_out / ds / "bboxes"
         self.jsonl_dir = self.bboxes_dir / "jsonl"
-        self.chunks_tmp_dir = self.bboxes_dir / "chunks"  # temp, không expose ra user
+        self.chunks_tmp_dir = self.bboxes_dir / "chunks"  # temp, does not expose user
         self.failed_dir = detect_out / ds / "failed_frames"
         for d in (self.jsonl_dir, self.chunks_tmp_dir, self.failed_dir):
             d.mkdir(parents=True, exist_ok=True)
@@ -51,14 +51,14 @@ class DetectionSaver:
 
     def save_chunk_rows(self, video_name: str, chunk_idx: int,
                         rows: list[dict]) -> None:
-        """Ghi kết quả chunk ra temp jsonl (gọi sau khi chunk xong)."""
+        """Write the chunk result to temp jsonl (call after the chunk is completed)."""
         path = self.chunk_rows_path(video_name, chunk_idx)
         with open(path, "w", encoding="utf-8") as f:
             for row in rows:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def load_chunk_rows(self, video_name: str, chunk_idx: int) -> list[dict]:
-        """Đọc lại temp jsonl của chunk (dùng khi resume để lấy cache)."""
+        """Read the temp jsonl of the chunk again (used when resume to get cache)."""
         path = self.chunk_rows_path(video_name, chunk_idx)
         if not path.exists():
             return []
@@ -72,7 +72,7 @@ class DetectionSaver:
 
     @staticmethod
     def rows_to_frame_cache(rows: list[dict]) -> dict[int, list[PersonBox]]:
-        """Reconstruct frame_cache từ saved rows (dùng khi resume)."""
+        """Reconstruct frame_cache from saved rows (used when resume)."""
         cache: dict[int, list[PersonBox]] = {}
         for row in rows:
             fid = row["frame_id"]
@@ -86,9 +86,9 @@ class DetectionSaver:
     # ---------- final video jsonl ----------
 
     def merge_to_video_jsonl(self, video_name: str, n_chunks: int) -> None:
-        """Merge tất cả chunk temp jsonls → 1 video jsonl (sorted by frame_id, dedup).
+        """Merge all chunk temp jsonls -> 1 video jsonl (sorted by frame_id, dedup).
 
-        Dedup: frame_id xuất hiện trong nhiều chunk (overlap) → giữ row từ chunk đầu tiên.
+        Dedup: frame_id appears in multiple chunks (overlap) → keeps row from the first chunk.
         """
         seen_fids: set[int] = set()
         all_rows: list[dict] = []
@@ -110,13 +110,13 @@ class DetectionSaver:
                              chunk_idx: int, chunk_rows: list[dict],
                              seg_start: int, seg_end: int,
                              conf_threshold: float) -> None:
-        """Sinh video visualize cho chunk và ảnh tĩnh các frame fail.
+        """Generate video visualization for chunks and still images of failed frames.
 
-        Video bao gồm tất cả frame [seg_start, seg_end]:
-        - Frame trong annotation: vẽ bbox + conf + frame_id + action_id
-        - Frame không trong annotation: ghi nguyên frame gốc
-        Frame fail → lưu thêm frame_XXXXXX.jpg riêng.
-        Chỉ gọi khi chunk_ok = False.
+        Video includes all frames [seg_start, seg_end]:
+        - Frame in annotation: draw bbox + conf + frame_id + action_id
+        - Frame not in annotation: record the original frame
+        Frame failure → save additional frame_XXXXX.jpg separately.
+        Call only when chunk_ok = False.
         """
         viz_dir = self.failed_dir / video_name / f"chunk_{chunk_idx:03d}"
         viz_dir.mkdir(parents=True, exist_ok=True)
@@ -150,7 +150,7 @@ class DetectionSaver:
                         cv2.imwrite(str(viz_dir / f"frame_{fid:06d}.jpg"), out_f)
                     writer.write(out_f)
                 else:
-                    # Frame không thuộc annotation range nào trong chunk
+                    # Frame does not belong to any annotation range in the chunk
                     writer.write(frame)
         finally:
             cap.release()
@@ -161,7 +161,7 @@ class DetectionSaver:
 
 def _draw_detection_frame(frame: np.ndarray, row: dict,
                           conf_threshold: float) -> None:
-    """Vẽ thông tin detection lên 1 frame (in-place)."""
+    """Draw detection information on 1 frame (in-place)."""
     fid = row.get("frame_id", "?")
     aid = row.get("action_id", "?")
     ok = row.get("ok", True)
@@ -174,7 +174,7 @@ def _draw_detection_frame(frame: np.ndarray, row: dict,
     cv2.putText(frame, header, (6, 22),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, hdr_color, 2)
 
-    # Vẽ bbox
+    # Draw bbox
     for b in row.get("bboxes", []) or []:
         x1, y1, x2, y2, conf = (
             int(b[0]), int(b[1]), int(b[2]), int(b[3]), float(b[4]))
@@ -183,7 +183,7 @@ def _draw_detection_frame(frame: np.ndarray, row: dict,
         cv2.putText(frame, f"{conf:.2f}", (x1, max(4, y1 - 4)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, bc, 1)
 
-    # Nếu fail và không có bbox: chú thích thêm
+    # If it fails and there is no bbox: additional comments
     if not ok and not row.get("bboxes"):
         cv2.putText(frame, "NO BBOX", (6, 46),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, _FAIL_COLOR, 2)

@@ -1,7 +1,7 @@
-"""CLI chay pipeline trich xuat skeleton.
+"""CLI to run the skeleton extraction pipeline.
 
-Vi du:
-    python scripts/run_extraction.py --config config.yaml --start 0 --end 10
+Example:
+    python src/run_extraction.py --config config.yaml --start 0 --end 10
 """
 from __future__ import annotations
 

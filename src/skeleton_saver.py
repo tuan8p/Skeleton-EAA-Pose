@@ -1,4 +1,4 @@
-"""Luu skeleton .npy + metadata .jsonl + anh frame loi."""
+"""Save skeleton .npy + metadata .jsonl + failed frame images."""
 from __future__ import annotations
 
 import json
@@ -15,7 +15,7 @@ class SkeletonSaver:
     """Layout output:
         output_dir/chunks/npy/<video>_chunk_NNN.npy
         output_dir/chunks/jsonl/<video>_chunk_NNN.jsonl
-        output_dir/actions/npy/<video>_NNN.npy      (tu split_actions)
+        output_dir/actions/npy/<video>_NNN.npy      (from split_actions)
         output_dir/actions/jsonl/<video>_NNN.jsonl
     """
 

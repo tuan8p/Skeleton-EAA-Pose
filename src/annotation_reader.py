@@ -1,4 +1,4 @@
-"""Doc annotation PKU-MMD Phase 1 va TSU, tra ve danh sach ActionSegment.
+"""Read PKU-MMD Phase 1 and TSU annotations, return list of ActionSegment.
 
 PKU : Label_PKUMMD/<video>.txt, moi dong: action_id,start_frame,end_frame,confidence
 TSU : annotation_dir/**/<video>.csv (cau truc phang hoac theo person), moi dong:

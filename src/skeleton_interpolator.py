@@ -27,8 +27,8 @@ class SkeletonInterpolator:
         self.max_gap = int(cfg.get("temporal.empty_run_frames", 30))
 
     def interpolate(self, skel: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """skel (T, P, J, 3) -> (ban sao da noi suy, filled[T]) voi filled[t]=True
-        neu frame t duoc lap it nhat 1 gia tri NaN."""
+        """skel (T, P, J, 3) -> (interpolated copy, filled[T]) where filled[t]=True
+        if frame t had at least 1 NaN value filled."""
         before = np.isnan(skel)
         out = skel.copy()
         self._temporal(out)

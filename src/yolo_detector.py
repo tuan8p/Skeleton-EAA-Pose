@@ -1,4 +1,4 @@
-"""YOLO26 detect person: tra ve toi da 2 box conf cao nhat. Fallback None neu loi."""
+"""YOLO person detector: returns up to 2 highest-confidence boxes. Falls back to None on error."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,7 +17,7 @@ class PersonBox:
     track_id: int | None = None
 
     def crop(self, frame: np.ndarray, margin: float = 0.1) -> tuple[np.ndarray, tuple[int, int]]:
-        """Tra ve (anh_crop, (x0, y0)) voi x0,y0 la offset goc trai-tren tren frame goc."""
+        """Returns (cropped_image, (x0, y0)) where x0,y0 is top-left offset in original frame."""
         h, w = frame.shape[:2]
         x1, y1, x2, y2 = self.xyxy
         mx, my = int((x2 - x1) * margin), int((y2 - y1) * margin)
@@ -26,7 +26,7 @@ class PersonBox:
 
 
 class YOLODetector:
-    """Tra ve None o constructor neu khong load duoc model (fallback BlazePose)."""
+    """Returns None in constructor if model fails to load (BlazePose fallback)."""
 
     def __init__(self, cfg: ConfigManager):
         self.conf_threshold = float(cfg.get("yolo.conf_threshold", 0.5))
@@ -49,10 +49,10 @@ class YOLODetector:
         """Detect person trong frame.
 
         Args:
-            frame_bgr: ảnh BGR numpy array (kích thước gốc).
-            imgsz: override inference size (None = để YOLO tự quyết, thường 640).
-                   Dùng 1280 khi retry để cải thiện detect người nhỏ.
-            augment: bật Test Time Augmentation (flip, scale) khi retry.
+            frame_bgr: BGR numpy array image (original size).
+            imgsz: override inference size (None = YOLO decides, usually 640).
+                   Use 1280 on retry to improve small person detection.
+            augment: enable Test Time Augmentation (flip, scale) when retrying.
         """
         if self._model is None:
             return []

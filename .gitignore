@@ -225,5 +225,4 @@ out/
 .ipynb_checkpoints/
 models/
 *.pt
-config.local.yaml
-yolo26n.pt
+notebooks/

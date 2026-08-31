@@ -1,4 +1,4 @@
-"""Anh xa 33 khop BlazePose -> 25 khop NTU (bang mapping co dinh).
+"""Map 33 BlazePose landmarks -> 25 NTU joints (fixed mapping table).
 
 Thu tu 25 khop NTU:
 0 SpineBase, 1 SpineMid, 2 Neck, 3 Head,
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-# NTU joint -> cac blaze joint lay trung binh
+# NTU joint -> BlazePose joints to average
 BLAZE_TO_NTU: list[list[int]] = [
     [23, 24],        # 0  SpineBase = mid-hip
     [11, 12, 23, 24],  # 1  SpineMid
@@ -53,7 +53,7 @@ NUM_NTU_JOINTS = 25
 
 
 class Mapper:
-    """Map landmarks 33 khop sang 25 khop NTU. Static methods de de test."""
+    """Map 33-landmark BlazePose output to 25 NTU joints. Static methods for easy testing."""
 
     @staticmethod
     def map_coords(landmarks: np.ndarray) -> np.ndarray:
@@ -65,7 +65,7 @@ class Mapper:
 
     @staticmethod
     def map_visibility(visibility: np.ndarray) -> np.ndarray:
-        """visibility (33,) -> (25,) bang trung binh cac khop thanh phan."""
+        """visibility (33,) -> (25,) by averaging component joint visibilities."""
         out = np.zeros(NUM_NTU_JOINTS, dtype=np.float32)
         for j, src in enumerate(BLAZE_TO_NTU):
             out[j] = visibility[src].mean()

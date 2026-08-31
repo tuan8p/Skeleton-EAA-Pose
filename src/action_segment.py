@@ -1,4 +1,4 @@
-"""Data class ActionSegment + xu ly overlap theo PLAN muc 2."""
+"""ActionSegment dataclass + overlap handling."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -20,7 +20,7 @@ class ActionSegment:
         return self.end_frame - self.start_frame + 1
 
     def resolve_overlap(self, last_processed_frame: int) -> tuple[int, int] | None:
-        """Tra ve (start, end) can xu ly sau khi loai phan da xu ly.
+        """Return (start, end) to process after excluding already-processed portion.
 
         None neu toan bo segment da bi phu boi cac segment truoc.
         """
